@@ -5,46 +5,30 @@ import requests
 st.set_page_config(page_title="Market Map Pro", layout="wide")
 
 # ------------------------------------------------------------
-# 1. CONFIGURATION FILTRÉE (UNIQUEMENT CE QUE VOUS VOULEZ)
+# 1. CONFIGURATION ÉPURÉE
 # ------------------------------------------------------------
 CONFIG = {
     'instruments': {
         'FOREX': [
-            # On garde tout le Forex pour que la matrice fonctionne bien
             'EUR_USD', 'GBP_USD', 'USD_JPY', 'USD_CHF', 'AUD_USD', 'USD_CAD', 'NZD_USD',
             'EUR_GBP', 'EUR_JPY', 'EUR_CHF', 'EUR_AUD', 'EUR_CAD', 'EUR_NZD',
             'GBP_JPY', 'GBP_CHF', 'GBP_AUD', 'GBP_CAD', 'GBP_NZD',
             'AUD_JPY', 'AUD_CAD', 'AUD_NZD', 'AUD_CHF',
             'CAD_JPY', 'CAD_CHF', 'NZD_JPY', 'NZD_CHF', 'CHF_JPY'
         ],
-        'INDICES': [
-            'US30_USD',    # Dow Jones
-            'NAS100_USD',  # Nasdaq
-            'SPX500_USD',  # S&P 500
-            'DE30_EUR'     # DAX
-        ],
-        'COMMODITIES': [
-            'XAU_USD',     # Gold
-            'XPT_USD',     # Platinum
-            'XAG_USD'      # Silver
-        ]
+        'INDICES': ['US30_USD', 'NAS100_USD', 'SPX500_USD', 'DE30_EUR'],
+        'COMMODITIES': ['XAU_USD', 'XPT_USD', 'XAG_USD']
     },
     'lookback_days': 1
 }
 
-# Noms d'affichage propres
 DISPLAY_NAMES = {
-    'US30_USD': 'DOW JONES',
-    'NAS100_USD': 'NASDAQ 100',
-    'SPX500_USD': 'S&P 500',
-    'DE30_EUR': 'DAX 40',
-    'XAU_USD': 'GOLD',
-    'XPT_USD': 'PLATINUM',
-    'XAG_USD': 'SILVER'
+    'US30_USD': 'DOW JONES', 'NAS100_USD': 'NASDAQ 100', 'SPX500_USD': 'S&P 500', 
+    'DE30_EUR': 'DAX 40', 'XAU_USD': 'GOLD', 'XPT_USD': 'PLATINUM', 'XAG_USD': 'SILVER'
 }
 
 # ------------------------------------------------------------
-# 2. MOTEUR DE DONNÉES (INVISIBLE)
+# 2. DATA ENGINE
 # ------------------------------------------------------------
 def get_oanda_credentials():
     try: return st.secrets["OANDA_ACCOUNT_ID"], st.secrets["OANDA_ACCESS_TOKEN"]
@@ -67,7 +51,6 @@ def get_market_data(config):
     results = {}
     if not get_oanda_credentials()[0]: return pd.DataFrame()
     
-    # Barre de progression discrète
     total = sum(len(v) for v in config['instruments'].values())
     prog = st.progress(0); curr = 0
     
@@ -87,7 +70,7 @@ def get_market_data(config):
     return pd.DataFrame.from_dict(results, orient='index')
 
 # ------------------------------------------------------------
-# 3. GÉNÉRATEUR HTML/CSS
+# 3. MOTEUR GRAPHIQUE INTELLIGENT
 # ------------------------------------------------------------
 def get_color(pct):
     if pct >= 0.50: return "#004d00" 
@@ -105,7 +88,6 @@ def get_color(pct):
 def generate_report(df):
     forex_df = df[df['cat'] == 'FOREX']
     
-    # --- LOGIQUE MATRIX FOREX ---
     data = {}
     if not forex_df.empty:
         for symbol, row in forex_df.iterrows():
@@ -120,9 +102,34 @@ def generate_report(df):
             data[base].append({'pair': f"{base}/{quote}", 'pct': pct, 'other': quote})
             data[quote].append({'pair': f"{quote}/{base}", 'pct': -pct, 'other': base})
     
-    currency_scores = {curr: sum(d['pct'] for d in items)/len(items) for curr, items in data.items()}
+    # --- ALGORITHME "SMART WEIGHTED SCORE" ---
+    # Objectif : Trier les colonnes (devises) comme Barchart
+    currency_scores = {}
+    
+    for curr, items in data.items():
+        score = 0
+        valid_items = 0
+        
+        for item in items:
+            opponent = item['other']
+            val = item['pct']
+            
+            # PONDÉRATION :
+            # Si on gagne contre USD, EUR ou JPY, ça compte DOUBLE.
+            # C'est la logique "Weighted" adaptée au sentiment de marché.
+            weight = 2.0 if opponent in ['USD', 'EUR', 'JPY'] else 1.0
+            
+            score += (val * weight)
+            valid_items += weight
+            
+        # Score final normalisé
+        final_score = score / valid_items if valid_items > 0 else 0
+        currency_scores[curr] = final_score
+
+    # Tri basé sur ce score intelligent
     sorted_currencies = sorted(currency_scores, key=currency_scores.get, reverse=True)
 
+    # --- GÉNÉRATION HTML ---
     html_forex = '<div class="matrix-container">'
     for curr in sorted_currencies:
         items = data[curr]
@@ -130,6 +137,7 @@ def generate_report(df):
         losers = [x for x in items if x['pct'] < -0.005]
         unchanged = [x for x in items if -0.005 <= x['pct'] < 0.005]
         
+        # Tri interne des piles (Magnitude simple)
         winners.sort(key=lambda x: x['pct'], reverse=True) 
         losers.sort(key=lambda x: x['pct'], reverse=True)
         
@@ -149,11 +157,9 @@ def generate_report(df):
         html_forex += '</div>'
     html_forex += '</div>'
 
-    # --- LOGIQUE INDICES ET COMMODITIES (SIMPLIFIÉE) ---
     def make_grid(cat):
         sub = df[df['cat'] == cat].sort_values(by='pct', ascending=False)
-        if sub.empty: return "<div style='color:#666'>Données indisponibles</div>"
-        
+        if sub.empty: return ""
         h = '<div class="grid-container">'
         for _, r in sub.iterrows():
             bg = get_color(r['pct'])
@@ -169,7 +175,6 @@ def generate_report(df):
     html_indices = make_grid('INDICES')
     html_commo = make_grid('COMMODITIES')
 
-    # --- CSS COMPLET ---
     full_html = f"""
     <!DOCTYPE html>
     <html>
@@ -177,7 +182,6 @@ def generate_report(df):
     <style>
         body {{ font-family: -apple-system, sans-serif; background-color: transparent; color: white; margin: 0; padding: 10px; }}
         
-        /* FOREX MATRIX (Horizontal Scroll) */
         .matrix-container {{
             display: flex; flex-direction: row; flex-wrap: nowrap;
             gap: 10px; overflow-x: auto; align-items: flex-start; padding-bottom: 20px;
@@ -186,7 +190,6 @@ def generate_report(df):
         .tile {{ display: flex; justify-content: space-between; padding: 4px 8px; margin-bottom: 1px; font-size: 11px; font-weight: bold; color: white; border-radius: 1px; }}
         .separator {{ background-color: #f0f0f0; color: #222; font-weight: 900; padding: 5px; margin: 3px 0; font-size: 13px; text-transform: uppercase; }}
         
-        /* GRIDS (INDICES/COMMO) */
         .grid-container {{ display: flex; flex-wrap: wrap; gap: 10px; }}
         .box {{ 
             width: 130px; height: 70px; 
@@ -204,13 +207,11 @@ def generate_report(df):
     </style>
     </head>
     <body>
-        <h3>💱 FOREX (Currency Strength)</h3>
+        <h3>💱 FOREX MAP</h3>
         {html_forex}
-        
-        <h3>📊 INDICES MAJEURS</h3>
+        <h3>📊 INDICES</h3>
         {html_indices}
-        
-        <h3>🪙 METAUX PRECIEUX</h3>
+        <h3>🪙 METAUX</h3>
         {html_commo}
     </body>
     </html>
@@ -218,14 +219,13 @@ def generate_report(df):
     return full_html
 
 # ------------------------------------------------------------
-# 4. APP PRINCIPALE
+# 4. APP SIMPLE
 # ------------------------------------------------------------
 st.title("🗺️ Market Map Pro")
 
 with st.sidebar:
-    st.header("Configuration")
-    CONFIG['lookback_days'] = st.slider("Période (Jours)", 1, 30, 1)
-    st.caption("1 jour = Daily Change")
+    st.header("Réglages")
+    CONFIG['lookback_days'] = st.slider("Période", 1, 5, 1)
 
 if st.button("🚀 ACTUALISER", type="primary"):
     df_res = get_market_data(CONFIG)
@@ -233,4 +233,4 @@ if st.button("🚀 ACTUALISER", type="primary"):
         html_code = generate_report(df_res)
         st.components.v1.html(html_code, height=1000, scrolling=True)
     else:
-        st.error("Impossible de récupérer les données. Vérifiez la connexion API.")
+        st.error("Erreur de données.")
