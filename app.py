@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from scipy.stats import zscore
 import requests
 from datetime import datetime, timedelta
 
 # ------------------------------------------------------------
-# 1. STYLE CSS (DESIGN TUILES)
+# 1. STYLE CSS (DESIGN TUILES - INCHANGÉ)
 # ------------------------------------------------------------
 st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
 
@@ -118,8 +117,8 @@ CONFIG = {
             'XCU_USD'      # Copper
         ]
     },
-    'lookback_days': 3,
-    'atr_period': 14
+    # REGLAGE BARCHART: Par défaut 1 jour pour correspondre au "Daily % Change"
+    'lookback_days': 1
 }
 
 # Mapping pour les noms d'affichage
@@ -145,7 +144,7 @@ def get_oanda_credentials():
     except:
         return None, None
 
-def fetch_oanda_candles(instrument, count=60):
+def fetch_oanda_candles(instrument, count=10):
     """Récupère les données OANDA pour un instrument"""
     account_id, access_token = get_oanda_credentials()
     
@@ -159,6 +158,7 @@ def fetch_oanda_candles(instrument, count=60):
         "Content-Type": "application/json"
     }
     
+    # On a besoin de peu de bougies pour le calcul de base
     params = {
         "count": count,
         "granularity": "D"
@@ -175,18 +175,15 @@ def fetch_oanda_candles(instrument, count=60):
             if not candles:
                 return None
             
+            # Note: Sur OANDA, la dernière bougie est celle en cours (si marché ouvert)
+            # ou la dernière clôturée (si marché fermé).
             df = pd.DataFrame([{
                 'time': c['time'],
-                'open': float(c['mid']['o']),
-                'high': float(c['mid']['h']),
-                'low': float(c['mid']['l']),
-                'close': float(c['mid']['c']),
-                'volume': int(c['volume'])
-            } for c in candles if c['complete']])
+                'close': float(c['mid']['c'])
+            } for c in candles])
             
             df['time'] = pd.to_datetime(df['time'])
             df = df.set_index('time')
-            df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
             
             return df
         else:
@@ -195,15 +192,8 @@ def fetch_oanda_candles(instrument, count=60):
         return None
 
 # ------------------------------------------------------------
-# 4. MOTEUR DE CALCUL (DATA)
+# 4. MOTEUR DE CALCUL (IDENTIQUE BARCHART)
 # ------------------------------------------------------------
-def calculate_atr(df, period=14):
-    high_low = df['High'] - df['Low']
-    high_close = (df['High'] - df['Close'].shift()).abs()
-    low_close = (df['Low'] - df['Close'].shift()).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    return tr.rolling(window=period, min_periods=1).mean()
-
 def get_market_data(config):
     results = {}
     
@@ -220,41 +210,48 @@ def get_market_data(config):
     status = st.empty()
     current = 0
     
+    lookback = config['lookback_days']
+    
     # Parcourir toutes les catégories
     for category, instruments in config['instruments'].items():
         for instrument in instruments:
             status.text(f"📊 OANDA: {instrument}...")
             
             try:
-                df = fetch_oanda_candles(instrument, count=60)
+                # On récupère assez de bougies pour le lookback
+                df = fetch_oanda_candles(instrument, count=lookback + 5)
                 
-                if df is None or len(df) < 20:
+                if df is None or len(df) <= lookback:
                     current += 1
                     progress_bar.progress(current / total_instruments)
                     continue
                 
-                close = df['Close']
+                close = df['close']
+                
+                # METHODE BARCHART : Pure Variation %
+                # Prix actuel (Dernière valeur disponible, même si bougie non finie)
                 price_now = close.iloc[-1]
-                price_past = close.shift(config['lookback_days']).iloc[-1]
+                
+                # Prix de référence (Clôture d'il y a X jours)
+                # Si lookback=1 (Vue Journalière) : On compare Now vs Close(Yesterday)
+                # shift(lookback) décale les données vers le bas.
+                price_past = close.shift(lookback).iloc[-1]
                 
                 if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
                     current += 1
                     progress_bar.progress(current / total_instruments)
                     continue
 
-                # Calculs
+                # Calcul du pourcentage simple
                 raw_move_pct = (price_now - price_past) / price_past
-                atr = calculate_atr(df, config['atr_period']).iloc[-1]
-                atr_pct = (atr / price_now) if price_now != 0 else 0.001
-                strength = raw_move_pct / max(atr_pct, 0.0001)
+                pct_change_val = raw_move_pct * 100
                 
                 # Nom d'affichage
                 display_name = DISPLAY_NAMES.get(instrument, instrument.replace('_', ''))
 
                 results[instrument] = {
                     'name': display_name,
-                    'raw_score': strength,
-                    'pct_change': raw_move_pct * 100,
+                    'pct_change': pct_change_val,
                     'category': category
                 }
                 
@@ -271,13 +268,14 @@ def get_market_data(config):
         return pd.DataFrame()
 
     df_res = pd.DataFrame.from_dict(results, orient='index')
+    # Tri par performance (comme Barchart)
     return df_res.sort_values(by='pct_change', ascending=False)
 
 # ------------------------------------------------------------
 # 5. GÉNÉRATEUR HTML
 # ------------------------------------------------------------
 def get_color(pct_change):
-    """Palette de couleurs basée sur la variation % réelle"""
+    """Palette de couleurs identique au code original"""
     if pct_change >= 0.50: return "#064e3b"
     if pct_change >= 0.30: return "#15803d"
     if pct_change >= 0.15: return "#22c55e"
@@ -333,16 +331,19 @@ def generate_full_html_report(df):
 # 6. APPLICATION STREAMLIT
 # ------------------------------------------------------------
 st.title("🗺️ Market Heatmap Pro")
-st.write("Toutes les données en temps réel via OANDA API 🟢")
+st.write("Données temps réel synchronisées (Calcul standard % Change)")
 
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    lookback = st.slider("Période d'analyse (jours)", 1, 10, CONFIG['lookback_days'])
+    st.write("Pour imiter Barchart:")
+    st.caption("- 1 jour = Daily Change (Défaut)")
+    st.caption("- 5 jours = 5-Day Performance")
+    
+    lookback = st.slider("Période d'analyse (jours)", 1, 30, CONFIG['lookback_days'])
     CONFIG['lookback_days'] = lookback
     
-    atr_period = st.slider("Période ATR", 5, 30, CONFIG['atr_period'])
-    CONFIG['atr_period'] = atr_period
+    # ATR supprimé de l'interface car non utilisé dans le calcul Barchart
     
     st.markdown("---")
     
@@ -363,7 +364,7 @@ with st.sidebar:
     """)
 
 if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
-    with st.spinner("Téléchargement des données OANDA..."):
+    with st.spinner("Analyse des performances (Barchart Logic)..."):
         df_results = get_market_data(CONFIG)
         
         if not df_results.empty:
@@ -459,7 +460,7 @@ if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
                 scrolling=True
             )
             
-            st.success("✅ Analyse terminée avec succès!")
+            st.success("✅ Analyse terminée (Calcul % Change standard)")
             
         else:
             st.error("Aucune donnée récupérée. Vérifiez votre configuration OANDA.")
