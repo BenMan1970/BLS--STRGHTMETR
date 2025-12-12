@@ -5,99 +5,101 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# CONFIGURATION
+# 1. STYLE CSS (DESIGN TUILES)
 # ------------------------------------------------------------
-st.set_page_config(page_title="Forex Market Map", layout="wide")
+st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { 
-        background-color: #f8f9fa;
-        font-family: Arial, sans-serif;
-    }
-    
-    .main-title {
-        font-size: 28px;
-        font-weight: 700;
-        color: #000;
-        margin-bottom: 10px;
-    }
-    
-    .date-info {
-        color: #666;
-        font-size: 14px;
-        margin-bottom: 20px;
-    }
-    
-    .matrix-grid {
-        display: grid;
-        grid-template-columns: 80px repeat(8, 150px);
-        gap: 0;
-        margin: 20px 0;
-        width: fit-content;
-    }
-    
-    .currency-header {
-        background-color: #e8e8e8;
-        border: 1px solid #d0d0d0;
-        padding: 15px;
-        text-align: center;
-        font-weight: 700;
-        font-size: 14px;
-        color: #333;
-    }
-    
-    .pair-cell {
-        border: 1px solid rgba(0,0,0,0.1);
-        padding: 10px;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.2s;
-        min-height: 60px;
+    /* Fond sombre global */
+    .stApp { background-color: #0e1117; }
+
+    /* CONTENEUR PRINCIPAL FLEXBOX (Pour aligner les tuiles) */
+    .heatmap-container {
         display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-start;
+        padding: 10px 0;
+        width: 100%;
+    }
+
+    /* LA TUILE (Carte rectangulaire) */
+    .market-tile {
+        display: inline-flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
+        width: 120px;
+        height: 70px;
+        border-radius: 6px;
+        color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        border: 1px solid rgba(255,255,255,0.08);
+        transition: transform 0.2s;
     }
     
-    .pair-cell:hover {
-        transform: scale(1.05);
-        z-index: 10;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    .market-tile:hover {
+        transform: translateY(-3px);
+        border-color: rgba(255,255,255,0.5);
+        cursor: pointer;
     }
-    
-    .pair-name {
-        font-weight: 700;
-        font-size: 12px;
+
+    /* Texte SYMBOLE (ex: EURUSD) */
+    .tile-symbol {
+        font-family: 'Arial', sans-serif;
+        font-weight: 800;
+        font-size: 14px;
         margin-bottom: 4px;
-        color: white;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
     }
     
-    .pair-value {
+    /* Texte SCORE (ex: 7.8) */
+    .tile-score {
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        font-size: 15px;
+        background-color: rgba(0,0,0,0.3);
+        padding: 2px 8px;
+        border-radius: 4px;
+    }
+
+    /* TITRES DES SECTIONS */
+    .section-header {
+        font-family: 'Helvetica', sans-serif;
+        font-size: 18px;
         font-weight: 600;
-        font-size: 13px;
-        color: white;
-    }
-    
-    .empty-cell {
-        background-color: #f0f0f0;
-        border: 1px solid #d0d0d0;
+        color: #8b949e;
+        margin-top: 25px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #30363d;
+        padding-bottom: 5px;
+        width: 100%;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# ------------------------------------------------------------
+# 2. CONFIGURATION DES ACTIFS
+# ------------------------------------------------------------
 CONFIG = {
-    'period': '60d',
-    'interval': '1d',
-    'lookback_days': 1,
-    'atr_period': 14
+    'tickers': [
+        # FOREX
+        'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
+        'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
+        'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
+        'AUDJPY=X', 'AUDCAD=X', 'AUDNZD=X', 'AUDCHF=X',
+        'CADJPY=X', 'CADCHF=X', 'NZDJPY=X', 'NZDCHF=X', 'CHFJPY=X',
+        # INDICES
+        '^DJI', '^GSPC', '^IXIC', '^FCHI', '^GDAXI',
+        # MATIÈRES PREMIÈRES
+        'GC=F', 'CL=F', 'SI=F', 'HG=F'
+    ],
+    'period': '60d', 'interval': '1d', 'lookback_days': 3, 'atr_period': 14
 }
 
-# Ordre exact de l'image
-CURRENCIES = ['EUR', 'USD', 'CAD', 'CHF', 'NZD', 'AUD', 'JPY', 'GBP']
-
 # ------------------------------------------------------------
-# MOTEUR DE CALCUL
+# 3. MOTEUR DE CALCUL (DATA)
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -106,223 +108,216 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
-def get_pair_ticker(base, quote):
-    """Convertit une paire en ticker Yahoo Finance"""
-    pair = f"{base}{quote}"
-    return f"{pair}=X"
-
-def calculate_pair_strength(base, quote, config):
-    """Calcule la variation % d'une paire"""
-    ticker = get_pair_ticker(base, quote)
+def get_market_data(config):
+    tickers = config['tickers']
+    # Téléchargement optimisé
+    data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
     
-    try:
-        df = yf.download(ticker, period=config['period'], interval=config['interval'], progress=False)
-        if df.empty or len(df) < 20:
-            # Essayer l'inverse
-            ticker_inv = get_pair_ticker(quote, base)
-            df = yf.download(ticker_inv, period=config['period'], interval=config['interval'], progress=False)
-            if df.empty or len(df) < 20:
-                return None
-            inverse = True
-        else:
-            inverse = False
-            
-        close = df['Close']
-        price_now = close.iloc[-1]
-        price_past = close.iloc[-2]  # Jour précédent
-        
-        if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
-            return None
-
-        # Calcul variation %
-        pct_change = ((price_now - price_past) / price_past) * 100
-        
-        if inverse:
-            pct_change = -pct_change
-        
-        return pct_change
-    except:
-        return None
-
-def get_all_pairs_data(currencies, config):
-    """Récupère toutes les variations"""
     results = {}
-    total = len(currencies) * len(currencies)
-    current = 0
     
-    progress_bar = st.progress(0)
-    status = st.empty()
-    
-    for i, base in enumerate(currencies):
-        for j, quote in enumerate(currencies):
-            if base == quote:
-                results[(i, j)] = None
-            else:
-                status.text(f"Analyse {base}/{quote}...")
-                pct = calculate_pair_strength(base, quote, config)
-                results[(i, j)] = pct
+    for ticker in tickers:
+        try:
+            df = data[ticker].dropna()
+            if len(df) < 20: continue
             
-            current += 1
-            progress_bar.progress(current / total)
-    
-    progress_bar.empty()
-    status.empty()
-    
-    return results
+            close = df['Close']
+            price_now = close.iloc[-1]
+            price_past = close.shift(config['lookback_days']).iloc[-1]
+            
+            if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
 
-def get_color_from_pct(pct):
-    """Couleurs basées sur le pourcentage de variation"""
-    if pct is None:
-        return "#e8e8e8"
-    
-    # Vert (positif)
-    if pct >= 0.20: return "#006400"    # Vert très foncé
-    if pct >= 0.15: return "#228B22"    # Vert foncé
-    if pct >= 0.10: return "#32CD32"    # Vert
-    if pct >= 0.05: return "#90EE90"    # Vert clair
-    if pct >= 0.01: return "#98FB98"    # Vert très clair
-    
-    # Rouge (négatif)
-    if pct <= -0.20: return "#8B0000"   # Rouge très foncé
-    if pct <= -0.15: return "#B22222"   # Rouge foncé
-    if pct <= -0.10: return "#DC143C"   # Rouge
-    if pct <= -0.05: return "#FF6347"   # Rouge clair
-    if pct <= -0.01: return "#FFA07A"   # Rouge très clair
-    
-    return "#D3D3D3"  # Gris neutre
+            # Calculs
+            raw_move_pct = (price_now - price_past) / price_past
+            atr = calculate_atr(df, config['atr_period']).iloc[-1]
+            atr_pct = (atr / price_now) if price_now != 0 else 0.001
+            strength = raw_move_pct / max(atr_pct, 0.0001)
+            
+            # Catégories
+            if "=X" in ticker: cat = "FOREX"
+            elif "=F" in ticker: cat = "COMMODITIES"
+            elif "^" in ticker: cat = "INDICES"
+            else: cat = "OTHER"
+            
+            # Nettoyage des noms
+            display_name = ticker.replace('=X','').replace('=F','').replace('^','')
+            mapping = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'}
+            display_name = mapping.get(display_name, display_name)
 
-# ------------------------------------------------------------
-# GÉNÉRATEUR HTML
-# ------------------------------------------------------------
-def generate_matrix_html(currencies, data):
-    """Génère la matrice exactement comme l'image"""
-    html = '<div class="matrix-grid">'
+            results[ticker] = {
+                'name': display_name,
+                'raw_score': strength,
+                'category': cat
+            }
+        except KeyError:
+            continue
+
+    if not results: return pd.DataFrame()
+
+    df_res = pd.DataFrame.from_dict(results, orient='index')
     
-    # Première ligne : en-têtes des colonnes (devises quote)
-    html += '<div class="currency-header"></div>'  # Coin vide
-    for currency in currencies:
-        html += f'<div class="currency-header">{currency}</div>'
+    # Normalisation sur 0-10
+    vals = df_res['raw_score'].values
+    z = zscore(vals)
+    z = np.clip(np.nan_to_num(z), -2.5, 2.5)
+    df_res['score'] = 5 + (z / 5) * 10
+    df_res['score'] = df_res['score'].clip(0, 10)
     
-    # Lignes de données
-    for i, base in enumerate(currencies):
-        # En-tête de ligne (devise base)
-        html += f'<div class="currency-header">{base}</div>'
-        
-        # Cellules de paires
-        for j, quote in enumerate(currencies):
-            if i == j:
-                # Cellule diagonale (devise contre elle-même)
-                html += f'<div class="pair-cell empty-cell"><span style="color: #333; font-weight: 700;">{base}</span></div>'
-            else:
-                pct = data.get((i, j))
-                
-                if pct is None:
-                    html += '<div class="pair-cell empty-cell"><span style="color: #999;">unch</span></div>'
-                else:
-                    color = get_color_from_pct(pct)
-                    pair_name = f"{base}/{quote}"
-                    
-                    html += f'''
-                    <div class="pair-cell" style="background-color: {color};">
-                        <div class="pair-name">{pair_name}</div>
-                        <div class="pair-value">{pct:+.2f}%</div>
-                    </div>
-                    '''
-        
-    html += '</div>'
-    return html
+    return df_res.sort_values(by='score', ascending=False)
 
 # ------------------------------------------------------------
-# APPLICATION
+# 4. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
 # ------------------------------------------------------------
-st.markdown('<div class="main-title">Forex Market Map</div>', unsafe_allow_html=True)
+def get_color(score):
+    # Palette Finviz: Vert Foncé (Achat Fort) -> Rouge Foncé (Vente Forte)
+    if score >= 8.5: return "#064e3b" # Vert Foncé
+    if score >= 7.0: return "#15803d" # Vert
+    if score >= 6.0: return "#22c55e" # Vert Clair
+    if score >= 5.5: return "#4b5563" # Gris-Vert
+    
+    if score <= 1.5: return "#7f1d1d" # Rouge Foncé
+    if score <= 3.0: return "#b91c1c" # Rouge
+    if score <= 4.0: return "#ef4444" # Rouge Clair
+    if score <= 4.5: return "#4b5563" # Gris-Rouge
+    
+    return "#374151" # Gris Neutre
 
-from datetime import datetime
-today = datetime.now().strftime("%a, %b %dth, %Y")
-st.markdown(f'<div class="date-info">{today}</div>', unsafe_allow_html=True)
+def generate_full_html_report(df):
+    """
+    Génère le HTML complet avec toutes les sections dans un seul bloc
+    """
+    if df.empty: return "<div style='color:red'>Aucune donnée.</div>"
+    
+    # Définition des sections
+    sections = [
+        ("💱 FOREX (Paires Majeures & Croisées)", 'FOREX'),
+        ("📊 INDICES MONDIAUX", 'INDICES'),
+        ("🪙 MATIÈRES PREMIÈRES", 'COMMODITIES')
+    ]
+    
+    # Construction du HTML en une seule fois
+    tiles_html = ""
+    
+    for title, cat_key in sections:
+        subset = df[df['category'] == cat_key]
+        if subset.empty: continue
+        
+        # Ajouter le titre de section
+        tiles_html += f'<div class="section-header">{title}</div>'
+        
+        # Ouvrir le conteneur
+        tiles_html += '<div class="heatmap-container">'
+        
+        # Ajouter toutes les tuiles
+        for _, row in subset.iterrows():
+            score = row['score']
+            name = row['name']
+            bg_color = get_color(score)
+            
+            tiles_html += f'''
+            <div class="market-tile" style="background-color: {bg_color};">
+                <div class="tile-symbol">{name}</div>
+                <div class="tile-score">{score:.1f}</div>
+            </div>
+            '''
+        
+        # Fermer le conteneur
+        tiles_html += '</div>'
+    
+    return tiles_html
 
-if st.button("🔄 Actualiser les données", type="primary"):
-    with st.spinner("Chargement des données du marché..."):
-        # Récupération des données
-        data = get_all_pairs_data(CURRENCIES, CONFIG)
+# ------------------------------------------------------------
+# 5. APPLICATION STREAMLIT
+# ------------------------------------------------------------
+st.title("🗺️ Market Heatmap Pro")
+st.write("Analyse de force relative. Vert = Acheteur | Rouge = Vendeur.")
+
+if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
+    with st.spinner("Téléchargement et calculs en cours..."):
+        # 1. Calculs
+        df_results = get_market_data(CONFIG)
         
-        # Génération de la matrice
-        matrix_html = generate_matrix_html(CURRENCIES, data)
-        
-        # Affichage
-        st.components.v1.html(
-            f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body {{
-                        margin: 0;
-                        padding: 20px;
-                        background-color: #f8f9fa;
-                        font-family: Arial, sans-serif;
-                    }}
-                    .matrix-grid {{
-                        display: grid;
-                        grid-template-columns: 80px repeat(8, 150px);
-                        gap: 0;
-                        margin: 0;
-                        width: fit-content;
-                    }}
-                    .currency-header {{
-                        background-color: #e8e8e8;
-                        border: 1px solid #d0d0d0;
-                        padding: 15px;
-                        text-align: center;
-                        font-weight: 700;
-                        font-size: 14px;
-                        color: #333;
-                    }}
-                    .pair-cell {{
-                        border: 1px solid rgba(0,0,0,0.1);
-                        padding: 10px;
-                        text-align: center;
-                        cursor: pointer;
-                        transition: all 0.2s;
-                        min-height: 60px;
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: center;
-                        align-items: center;
-                    }}
-                    .pair-cell:hover {{
-                        transform: scale(1.05);
-                        z-index: 10;
-                        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                    }}
-                    .pair-name {{
-                        font-weight: 700;
-                        font-size: 12px;
-                        margin-bottom: 4px;
-                        color: white;
-                    }}
-                    .pair-value {{
-                        font-weight: 600;
-                        font-size: 13px;
-                        color: white;
-                    }}
-                    .empty-cell {{
-                        background-color: #f0f0f0;
-                        border: 1px solid #d0d0d0;
-                    }}
-                </style>
-            </head>
-            <body>
-                {matrix_html}
-            </body>
-            </html>
-            """,
-            height=700,
-            scrolling=True
-        )
-        
-        st.success("✅ Matrice mise à jour avec succès !")
+        if not df_results.empty:
+            # 2. Génération et affichage du HTML
+            html_content = generate_full_html_report(df_results)
+            
+            # 3. Affichage avec components.html pour un meilleur rendu
+            st.components.v1.html(
+                f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{
+                            margin: 0;
+                            padding: 0;
+                            background-color: transparent;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        }}
+                        .heatmap-container {{
+                            display: flex;
+                            flex-wrap: wrap;
+                            gap: 8px;
+                            justify-content: flex-start;
+                            padding: 10px 0;
+                            width: 100%;
+                        }}
+                        .market-tile {{
+                            display: inline-flex;
+                            flex-direction: column;
+                            justify-content: center;
+                            align-items: center;
+                            width: 120px;
+                            height: 70px;
+                            border-radius: 6px;
+                            color: white;
+                            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                            border: 1px solid rgba(255,255,255,0.08);
+                            transition: transform 0.2s;
+                        }}
+                        .market-tile:hover {{
+                            transform: translateY(-3px);
+                            border-color: rgba(255,255,255,0.5);
+                            cursor: pointer;
+                        }}
+                        .tile-symbol {{
+                            font-family: 'Arial', sans-serif;
+                            font-weight: 800;
+                            font-size: 14px;
+                            margin-bottom: 4px;
+                            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                        }}
+                        .tile-score {{
+                            font-family: 'Courier New', monospace;
+                            font-weight: bold;
+                            font-size: 15px;
+                            background-color: rgba(0,0,0,0.3);
+                            padding: 2px 8px;
+                            border-radius: 4px;
+                        }}
+                        .section-header {{
+                            font-family: 'Helvetica', sans-serif;
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: #8b949e;
+                            margin-top: 25px;
+                            margin-bottom: 10px;
+                            border-bottom: 1px solid #30363d;
+                            padding-bottom: 5px;
+                            width: 100%;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    {html_content}
+                </body>
+                </html>
+                """,
+                height=800,
+                scrolling=True
+            )
+            
+        else:
+            st.error("Erreur de récupération des données. Vérifiez votre connexion.")
 
 else:
-    st.info("👆 Cliquez pour charger la matrice du marché Forex")
-             
+    st.info("Cliquez sur le bouton pour lancer l'analyse.")
