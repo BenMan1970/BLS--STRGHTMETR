@@ -49,6 +49,13 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
+def get_strength_label(score):
+    if score <= 2: return "Très Faible"
+    elif score <= 4: return "Faible"
+    elif score <= 6: return "Neutre"
+    elif score <= 8: return "Fort"
+    else: return "Très Fort"
+
 # ----------------------------
 # CORE: compute_strength
 # ----------------------------
@@ -348,6 +355,10 @@ if st.button("🚀 Lancer l'Analyse", use_container_width=True):
                     score = float(df_cat.loc[ent, 'score_smoothed'])
                     height_pct = max(min(score / 10.0, 1.0), 0.0) * 100
                     bulb_color = '#ef4444' if score < 4 else ('#fde047' if score < 7 else '#22c55e')
+                    bulb_dark = '#dc2626' if score < 4 else ('#eab308' if score < 7 else '#16a34a')
+                    r = int(bulb_color[1:3], 16)
+                    g = int(bulb_color[3:5], 16)
+                    b = int(bulb_color[5:7], 16)
                     
                     gauge_html += f"""
                     <div class="gauge-card">
@@ -355,7 +366,7 @@ if st.button("🚀 Lancer l'Analyse", use_container_width=True):
                         <div class="thermometer">
                             <div class="thermo-fill" style="height: {height_pct}%;"></div>
                         </div>
-                        <div class="thermo-bulb" style="background: radial-gradient(circle, {bulb_color} 0%, darken({bulb_color}, 20%) 100%); box-shadow: 0 0 20px rgba({int(bulb_color[1:3],16)}, {int(bulb_color[3:5],16)}, {int(bulb_color[5:7],16)}, 0.6);"></div>
+                        <div class="thermo-bulb" style="background: radial-gradient(circle, {bulb_color} 0%, {bulb_dark} 100%); box-shadow: 0 0 20px rgba({r}, {g}, {b}, 0.6);"></div>
                         <div class="score-display">{score:.1f}</div>
                         <div class="strength-label">{get_strength_label(score)}</div>
                     </div>
@@ -389,10 +400,3 @@ st.markdown("""
     Made with 💜 | Données: Yahoo Finance | Design Aquarelle Vibrant
 </p>
 """, unsafe_allow_html=True)
-
-def get_strength_label(score):
-    if score <= 2: return "Très Faible"
-    elif score <= 4: return "Faible"
-    elif score <= 6: return "Neutre"
-    elif score <= 8: return "Fort"
-    else: return "Très Fort"
