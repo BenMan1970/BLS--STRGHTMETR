@@ -1,15 +1,16 @@
+# app.py — Strength Meter PRO (Full functional, Neon Artefact Bar Scroller)
 import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
 from scipy.stats import zscore
-import plotly.express as px
 
-# ------------------------------------------------------------
-# CONFIGURATION
-# ------------------------------------------------------------
+# ----------------------------
+# CONFIG
+# ----------------------------
 CONFIG = {
     'tickers': {
+        # FX major & crosses (add/remove as you want)
         'EURUSD=X': [20.0, 'EUR', 'USD', 'FX'],
         'USDJPY=X': [15.0, 'USD', 'JPY', 'FX'],
         'GBPUSD=X': [10.0, 'GBP', 'USD', 'FX'],
@@ -23,11 +24,13 @@ CONFIG = {
         'AUDJPY=X': [2.0, 'AUD', 'JPY', 'FX'],
         'EURAUD=X': [2.0, 'EUR', 'AUD', 'FX'],
         'EURCHF=X': [2.0, 'EUR', 'CHF', 'FX'],
+        # Metals
         'GC=F': [8.0, 'XAU', 'USD', 'METAL'],
         'PL=F': [2.0, 'XPT', 'USD', 'METAL'],
+        # Indices
         '^DJI': [8.0, 'US30', 'USD', 'INDEX'],
         '^IXIC': [8.0, 'NAS100', 'USD', 'INDEX'],
-        '^GSPC': [10.0, 'SPX500', 'USD', 'INDEX']
+        '^GSPC': [10.0, 'SPX500', 'USD', 'INDEX'],
     },
     'period': '60d',
     'interval': '1d',
@@ -38,9 +41,9 @@ CONFIG = {
     'category_mode': True
 }
 
-# ------------------------------------------------------------
-# UTILS
-# ------------------------------------------------------------
+# ----------------------------
+# UTIL: ATR
+# ----------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
@@ -48,48 +51,29 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
-# Gauge HTML: 11 blocks (0..10) but we display 10 colored steps — mapping 0..10 -> index
-def color_bar(score):
-    # score expected in 0..10 (float)
+# ----------------------------
+# Neon color mapping
+# ----------------------------
+def neon_color(score):
+    # score in 0..10
     try:
-        score_int = int(round(float(score)))
+        s = float(score)
     except Exception:
-        score_int = 0
-    # clamp
-    score_int = max(0, min(10, score_int))
+        s = 5.0
+    if s <= 3:
+        return '#ff005e'  # neon red
+    elif s <= 5:
+        return '#ff7a20'  # neon orange
+    elif s <= 7:
+        return '#ffea00'  # neon yellow
+    elif s <= 9:
+        return '#00ff9d'  # neon green
+    else:
+        return '#00eaff'  # neon cyan (highest)
 
-    # 10 colors from red -> green (we keep 10 blocks)
-    colors = [
-        "#d73027", "#f46d43", "#fdae61", "#fee08b",
-        "#ffffbf", "#d9ef8b", "#a6d96a", "#66bd63",
-        "#1a9850", "#006837"
-    ]
-
-    blocks = ""
-    # If score_int == 10, light up last block; when score_int==0, light up first block.
-    # We'll map score 0..10 to block index 0..9 by min(score_int,9)
-    lit_index = min(score_int, 9)
-
-    for i in range(10):
-        col = colors[i]
-        opacity = "1.0" if i == lit_index else "0.20"
-        blocks += f"<div style='width:28px;height:22px;background:{col};opacity:{opacity};border-radius:6px;margin-right:6px;box-shadow:0 1px 2px rgba(0,0,0,0.4);'></div>"
-
-    return f"<div style='display:flex;flex-direction:row;align-items:center;'>{blocks}</div>"
-
-# Styling helper for dataframe
-def highlight_strength(val):
-    try:
-        v = float(val)
-    except Exception:
-        return ""
-    color = "rgba(0,200,0,0.35)" if v > 7 else (
-            "rgba(255,165,0,0.35)" if v > 4 else "rgba(255,0,0,0.35)")
-    return f"background-color:{color};color:white;font-weight:bold;"
-
-# ------------------------------------------------------------
-# CORE
-# ------------------------------------------------------------
+# ----------------------------
+# CORE: compute_strength
+# ----------------------------
 def compute_strength(config=CONFIG):
     tickers_cfg = config['tickers']
     lookback = config['lookback_days']
@@ -97,29 +81,46 @@ def compute_strength(config=CONFIG):
     atr_floor_pct = config['atr_floor_pct']
 
     all_tickers = list(tickers_cfg.keys())
-    data = yf.download(all_tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
 
+    # Download data (yfinance supports multiple tickers)
+    try:
+        data = yf.download(all_tickers, period=config['period'], interval=config['interval'],
+                           group_by='ticker', progress=False, threads=True)
+    except Exception as e:
+        st.error(f"Erreur téléchargement yfinance: {e}")
+        return pd.DataFrame(), {}
+
+    # Determine unique entities (currencies / XAU / indices etc.)
     entities = set()
     for t, v in tickers_cfg.items():
         entities.add(v[1])
         entities.add(v[2])
 
-    scores_acc = {e: {'weighted_sum': 0, 'total_weight': 0} for e in entities}
-
+    scores_acc = {e: {'weighted_sum': 0.0, 'total_weight': 0.0} for e in entities}
     categories = {}
     if config['category_mode']:
         for t, v in tickers_cfg.items():
             cat = v[3]
             if cat not in categories:
-                categories[cat] = {e: {'weighted_sum': 0, 'total_weight': 0} for e in entities}
+                categories[cat] = {e: {'weighted_sum': 0.0, 'total_weight': 0.0} for e in entities}
 
+    # For each ticker compute strength contribution
     for ticker, info in tickers_cfg.items():
         weight, base, quote, category = info
 
-        if ticker not in data.columns.get_level_values(0):
-            continue
+        # Skip if data missing
+        try:
+            if ticker not in data.columns.get_level_values(0):
+                continue
+            df = data[ticker].dropna()
+        except Exception:
+            # Single ticker frame shape might be different
+            try:
+                # fallback: if data is not multiindexed (single ticker)
+                df = data.dropna()
+            except Exception:
+                continue
 
-        df = data[ticker].dropna()
         if df.empty or len(df) < max(atr_period + 2, lookback + 2):
             continue
 
@@ -151,12 +152,14 @@ def compute_strength(config=CONFIG):
             categories[category][quote]['weighted_sum'] += (-strength) * weight
             categories[category][quote]['total_weight'] += weight
 
+    # Raw values
     raw_values = {}
     for ent, v in scores_acc.items():
-        raw_values[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0
+        raw_values[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0.0
 
     df_raw = pd.Series(raw_values, name='raw_strength').to_frame()
 
+    # z-score normalization and scale to 0..10 (same logic as before)
     vals = df_raw['raw_strength'].values
     if np.nanstd(vals) == 0:
         z = np.zeros_like(vals)
@@ -176,12 +179,13 @@ def compute_strength(config=CONFIG):
 
     df_raw = df_raw.sort_values(by='score_smoothed', ascending=False)
 
+    # Also prepare category frames (optional)
     category_frames = {}
     if config['category_mode']:
         for cat, acc in categories.items():
             tmp = {}
             for ent, v in acc.items():
-                tmp[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0
+                tmp[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0.0
             s = pd.Series(tmp)
             if s.std() == 0:
                 zc = np.zeros_like(s.values)
@@ -194,154 +198,141 @@ def compute_strength(config=CONFIG):
 
     return df_raw, category_frames
 
-# ------------------------------------------------------------
-# STREAMLIT APP — ARTEFACT BAR SCROLLER NEON
-# ------------------------------------------------------------
-
+# ----------------------------
+# STREAMLIT UI + STYLES
+# ----------------------------
 st.set_page_config(page_title="Strength Meter PRO", layout="wide")
+st.title("Strength Meter PRO — Artefact NEON")
 
-# Inject NEON CSS for Artefact Scroller
 st.markdown("""
 <style>
-body {background-color:#050505; color:#e0ffef;}
-.bar-container {
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-  margin-top:25px;
-}
+/* Page background */
+[data-testid="stAppViewContainer"] { background-color: #050505; color: #e0fff5; }
+/* Container for bars */
+.bar-container { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+/* Single bar item */
 .bar-item {
-  display:flex;
-  align-items:center;
-  padding:14px 18px;
-  border-radius:10px;
-  background:rgba(10,10,10,0.6);
-  backdrop-filter:blur(8px);
-  border:1px solid rgba(255,255,255,0.08);
-  box-shadow:0 0 12px rgba(0,255,160,0.12);
+  display:flex; align-items:center; gap:12px;
+  padding:10px 14px; border-radius:10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.04);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.6);
 }
-.bar-label {
-  width:90px;
-  font-weight:bold;
-  font-size:18px;
-  color:#baffe8;
-}
-.neon-bar {
-  flex:1;
-  height:18px;
-  border-radius:9px;
-  background:linear-gradient(90deg,#400,#200);
-  position:relative;
-  overflow:hidden;
-  box-shadow:0 0 6px rgba(0,0,0,0.6);
-}
-.neon-fill {
-  height:100%;
-  width:50%;
-  border-radius:9px;
-  background:#0f0;
-  box-shadow:0 0 10px #0f0;
-  transition:width 0.4s ease-out, background 0.4s ease-out, box-shadow 0.4s ease-out;
-}
-.score-text {
-  width:70px;
-  text-align:right;
-  font-weight:bold;
-  font-size:18px;
-  color:#afffef;
-  margin-left:12px;
+/* left label */
+.bar-label { width:110px; font-weight:700; font-size:15px; color:#bfffe8; }
+/* neon bar track */
+.neon-bar { flex:1; height:18px; border-radius:12px; overflow:hidden; background:#0b0b0b; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
+/* fill */
+.neon-fill { height:100%; border-radius:12px; transition: width 0.45s ease, box-shadow 0.3s ease; }
+/* score */
+.score-text { width:70px; text-align:right; font-weight:700; color:#9fffe0; }
+/* small caption */
+.small { font-size:13px; color:#9fbfb2; margin-top:8px; }
+/* responsive */
+@media (max-width:700px) {
+  .bar-label { width:80px; font-size:13px; }
+  .score-text { width:56px; font-size:14px; }
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Strength Meter PRO — Artefact NEON")
-st.write("Visualisation Artefact / Bloomberg en barres néon dynamiques.")
+st.markdown("**Description:** Artefact-style neon scroller affichant entités et paires. Calcul basé sur ATR + zscore, score 0→10 (smoothed).")
+st.markdown("---")
 
-# ---- SECTION 1: DEVISES (ENTITÉS) ----
-# Neon color mapping
-def neon_color(score):
-    if score < 3:
-        return "#ff005d"  # neon red
-    elif score < 6:
-        return "#ff9900"  # neon orange
-    elif score < 8:
-        return "#ffee00"  # neon yellow
-    else:
-        return "#00ff9d"  # neon green
-
-# ---- SECTION 2: PAIRES / ACTIFS INDIVIDUELS ----
-
+# ----------------------------
+# ACTION
+# ----------------------------
 if st.button("Calculer"):
-    df, cats = compute_strength(CONFIG)
+    with st.spinner("Téléchargement et calcul en cours..."):
+        df_entities, cats = compute_strength(CONFIG)
 
-    # ---- ENTITÉS ----
-    st.subheader("Artefact Neon Bar Scroller — Devises (entités)")
-    st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
-    for asset in df.index:
-        score = float(df.loc[asset, 'score_smoothed'])
-        pct = min(max(score / 10, 0), 1) * 100
-        color = neon_color(score)
-        st.markdown(f"""
-        <div class='bar-item'>
-            <div class='bar-label'>{asset}</div>
-            <div class='neon-bar'>
-                <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
+    if df_entities is None or df_entities.empty:
+        st.error("Aucune donnée calculée — vérifie la connexion yfinance ou la configuration des tickers.")
+    else:
+        # ENTITIES section
+        st.subheader("Entities — Strength (smoothed)")
+        st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+        for ent in df_entities.index:
+            score = float(df_entities.loc[ent, 'score_smoothed'])
+            pct = max(min(score / 10.0, 1.0), 0.0) * 100
+            color = neon_color(score)
+            # build HTML per bar
+            bar_html = f"""
+            <div class='bar-item'>
+                <div class='bar-label'>{ent}</div>
+                <div class='neon-bar'>
+                    <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow: 0 0 14px {color};'></div>
+                </div>
+                <div class='score-text'>{score:.2f}</div>
             </div>
-            <div class='score-text'>{score:.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+            """
+            st.markdown(bar_html, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---- PAIRES ----
-    st.subheader("Artefact Neon Bar Scroller — Paires & Actifs")
-    st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+        st.markdown("---")
+        # PAIRS / TICKERS section
+        st.subheader("Pairs & Assets (approx. from entity difference)")
 
-    for ticker, info in CONFIG['tickers'].items():
-        base = info[1]
-        quote = info[2]
-        if base in df.index and quote in df.index:
-            score = float(df.loc[base, 'score_smoothed'] - df.loc[quote, 'score_smoothed'])
-            score_norm = max(min((score + 10) / 20 * 10, 10), 0)
-            pct = min(max(score_norm / 10, 0), 1) * 100
-            color = neon_color(score_norm)
-            st.markdown(f"""
+        # Build a DataFrame for pairs (ticker wise)
+        pairs_list = []
+        for ticker, info in CONFIG['tickers'].items():
+            weight, base, quote, category = info
+            # If both entities present compute pair score as base - quote (smoothed)
+            if base in df_entities.index and quote in df_entities.index:
+                base_s = float(df_entities.loc[base, 'score_smoothed'])
+                quote_s = float(df_entities.loc[quote, 'score_smoothed'])
+                diff = base_s - quote_s  # in approx -10..10
+                # normalize diff (-10..10) -> 0..10
+                pair_score = (diff + 10.0) / 20.0 * 10.0
+                pair_score = float(np.clip(pair_score, 0.0, 10.0))
+            else:
+                # fallback neutral
+                pair_score = 5.0
+            pairs_list.append({'ticker': ticker, 'base': base, 'quote': quote, 'score': round(pair_score, 3), 'category': category})
+
+        df_pairs = pd.DataFrame(pairs_list).sort_values(by='score', ascending=False).reset_index(drop=True)
+
+        # render bars for pairs
+        st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+        for _, row in df_pairs.iterrows():
+            ticker = row['ticker']
+            score = float(row['score'])
+            pct = max(min(score / 10.0, 1.0), 0.0) * 100
+            color = neon_color(score)
+            html = f"""
             <div class='bar-item'>
                 <div class='bar-label'>{ticker}</div>
                 <div class='neon-bar'>
-                    <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
+                    <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow: 0 0 14px {color};'></div>
                 </div>
-                <div class='score-text'>{score_norm:.2f}</div>
+                <div class='score-text'>{score:.2f}</div>
             </div>
-            """, unsafe_allow_html=True)
+            """
+            st.markdown(html, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
-else:
-    st.info("Cliquez sur Calculer pour lancer l'analyse dans le style Artefact NEON.")("Calculer")("Calculer"):
-    df, cats = compute_strength(CONFIG)
+        # allow download of CSV combining entities + pairs
+        out_entities = df_entities.reset_index().rename(columns={'index': 'entity'})
+        out_pairs = df_pairs.copy()
+        # merge or output two files combined in a zip? for simplicity combine in one CSV with a section header
+        csv_buf = "== ENTITIES ==\n" + out_entities.to_csv(index=False) + "\n== PAIRS ==\n" + out_pairs.to_csv(index=False)
+        st.download_button("Télécharger résultats (CSV)", csv_buf.encode('utf-8'), file_name='strength_results.csv', mime='text/csv')
 
-    st.subheader("Artefact Neon Bar Scroller — Devises (entités)")
-
-    st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
-
-    for asset in df.index:
-        score = float(df.loc[asset, 'score_smoothed'])
-        pct = min(max(score / 10, 0), 1) * 100
-        color = neon_color(score)
-
-        bar_html = f"""
-        <div class='bar-item'>
-            <div class='bar-label'>{asset}</div>
-            <div class='neon-bar'>
-                <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
-            </div>
-            <div class='score-text'>{score:.2f}</div>
-        </div>
-        """
-        st.markdown(bar_html, unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        # Optionally show categories
+        if cats:
+            st.markdown("---")
+            st.subheader("Par catégorie")
+            for cat_name, frame in cats.items():
+                st.markdown(f"**{cat_name}**")
+                st.dataframe(frame.style.highlight_max(axis=0), height=250)
 
 else:
-    st.info("Cliquez sur Calculer pour lancer l'analyse dans le style Artefact NEON.")
+    st.info("Cliquez sur 'Calculer' pour lancer l'analyse (yfinance).")
 
-# End of app
+# ----------------------------
+# FOOTER / THEME INSTRUCTIONS
+# ----------------------------
+st.markdown("---")
+st.markdown("<div class='small'>Thème: fond dark. Pour activer thème Streamlit global, crée .streamlit/config.toml (voir docs).</div>", unsafe_allow_html=True)
+
+
