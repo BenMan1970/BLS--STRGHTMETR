@@ -17,26 +17,26 @@ st.markdown("""
     /* CONTENEUR PRINCIPAL FLEXBOX (Pour aligner les tuiles) */
     .heatmap-container {
         display: flex;
-        flex-wrap: wrap;       /* Important: permet de passer à la ligne */
-        gap: 8px;              /* Espace entre les tuiles */
+        flex-wrap: wrap;
+        gap: 8px;
         justify-content: flex-start;
-        padding-bottom: 30px;
+        padding: 10px 0;
+        width: 100%;
     }
 
     /* LA TUILE (Carte rectangulaire) */
     .market-tile {
-        display: flex;
+        display: inline-flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        width: 120px;          /* Largeur fixe */
-        height: 70px;          /* Hauteur fixe */
+        width: 120px;
+        height: 70px;
         border-radius: 6px;
         color: white;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         border: 1px solid rgba(255,255,255,0.08);
         transition: transform 0.2s;
-        margin-bottom: 5px;    /* Sécurité d'espacement */
     }
     
     .market-tile:hover {
@@ -70,12 +70,11 @@ st.markdown("""
         font-size: 18px;
         font-weight: 600;
         color: #8b949e;
-        margin-top: 15px;
+        margin-top: 25px;
         margin-bottom: 10px;
         border-bottom: 1px solid #30363d;
         padding-bottom: 5px;
         width: 100%;
-        display: block;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -184,12 +183,9 @@ def get_color(score):
 
 def generate_full_html_report(df):
     """
-    Cette fonction construit TOUT le code HTML en une seule chaine de caractères.
-    C'est ce qui empêche les bugs d'affichage.
+    Génère le HTML complet avec toutes les sections dans un seul bloc
     """
     if df.empty: return "<div style='color:red'>Aucune donnée.</div>"
-    
-    full_html = ""
     
     # Définition des sections
     sections = [
@@ -198,34 +194,36 @@ def generate_full_html_report(df):
         ("🪙 MATIÈRES PREMIÈRES", 'COMMODITIES')
     ]
     
+    # Construction du HTML en une seule fois
+    tiles_html = ""
+    
     for title, cat_key in sections:
         subset = df[df['category'] == cat_key]
         if subset.empty: continue
         
-        # 1. Ajouter le Titre de section
-        full_html += f"<div class='section-header'>{title}</div>"
+        # Ajouter le titre de section
+        tiles_html += f'<div class="section-header">{title}</div>'
         
-        # 2. Ouvrir le conteneur flexible
-        full_html += "<div class='heatmap-container'>"
+        # Ouvrir le conteneur
+        tiles_html += '<div class="heatmap-container">'
         
-        # 3. Boucle sur les tuiles
+        # Ajouter toutes les tuiles
         for _, row in subset.iterrows():
             score = row['score']
             name = row['name']
             bg_color = get_color(score)
             
-            # HTML de la tuile
-            full_html += f"""
+            tiles_html += f'''
             <div class="market-tile" style="background-color: {bg_color};">
                 <div class="tile-symbol">{name}</div>
                 <div class="tile-score">{score:.1f}</div>
             </div>
-            """
-            
-        # 4. Fermer le conteneur
-        full_html += "</div>"
+            '''
         
-    return full_html
+        # Fermer le conteneur
+        tiles_html += '</div>'
+    
+    return tiles_html
 
 # ------------------------------------------------------------
 # 5. APPLICATION STREAMLIT
@@ -239,15 +237,88 @@ if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
         df_results = get_market_data(CONFIG)
         
         if not df_results.empty:
-            # 2. Génération du HTML (invisible pour l'instant)
+            # 2. Génération et affichage du HTML
             html_content = generate_full_html_report(df_results)
             
-            # 3. Affichage (Le moment critique)
-            # unsafe_allow_html=True est OBLIGATOIRE ici
-            st.markdown(html_content, unsafe_allow_html=True)
+            # 3. Affichage avec components.html pour un meilleur rendu
+            st.components.v1.html(
+                f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{
+                            margin: 0;
+                            padding: 0;
+                            background-color: transparent;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        }}
+                        .heatmap-container {{
+                            display: flex;
+                            flex-wrap: wrap;
+                            gap: 8px;
+                            justify-content: flex-start;
+                            padding: 10px 0;
+                            width: 100%;
+                        }}
+                        .market-tile {{
+                            display: inline-flex;
+                            flex-direction: column;
+                            justify-content: center;
+                            align-items: center;
+                            width: 120px;
+                            height: 70px;
+                            border-radius: 6px;
+                            color: white;
+                            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                            border: 1px solid rgba(255,255,255,0.08);
+                            transition: transform 0.2s;
+                        }}
+                        .market-tile:hover {{
+                            transform: translateY(-3px);
+                            border-color: rgba(255,255,255,0.5);
+                            cursor: pointer;
+                        }}
+                        .tile-symbol {{
+                            font-family: 'Arial', sans-serif;
+                            font-weight: 800;
+                            font-size: 14px;
+                            margin-bottom: 4px;
+                            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                        }}
+                        .tile-score {{
+                            font-family: 'Courier New', monospace;
+                            font-weight: bold;
+                            font-size: 15px;
+                            background-color: rgba(0,0,0,0.3);
+                            padding: 2px 8px;
+                            border-radius: 4px;
+                        }}
+                        .section-header {{
+                            font-family: 'Helvetica', sans-serif;
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: #8b949e;
+                            margin-top: 25px;
+                            margin-bottom: 10px;
+                            border-bottom: 1px solid #30363d;
+                            padding-bottom: 5px;
+                            width: 100%;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    {html_content}
+                </body>
+                </html>
+                """,
+                height=800,
+                scrolling=True
+            )
             
         else:
             st.error("Erreur de récupération des données. Vérifiez votre connexion.")
 
 else:
     st.info("Cliquez sur le bouton pour lancer l'analyse.")
+  
