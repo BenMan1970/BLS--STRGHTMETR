@@ -276,6 +276,7 @@ def get_market_data(config, use_oanda=True):
             results[ticker] = {
                 'name': display_name,
                 'raw_score': strength,
+                'pct_change': raw_move_pct * 100,  # Variation en %
                 'category': cat
             }
             data_sources[ticker] = source
@@ -291,31 +292,29 @@ def get_market_data(config, use_oanda=True):
 
     df_res = pd.DataFrame.from_dict(results, orient='index')
     
-    # Normalisation sur 0-10
-    vals = df_res['raw_score'].values
-    z = zscore(vals)
-    z = np.clip(np.nan_to_num(z), -2.5, 2.5)
-    df_res['score'] = 5 + (z / 5) * 10
-    df_res['score'] = df_res['score'].clip(0, 10)
-    
-    return df_res.sort_values(by='score', ascending=False), data_sources
+    # Tri par variation % (du plus positif au plus négatif)
+    return df_res.sort_values(by='pct_change', ascending=False), data_sources
 
 # ------------------------------------------------------------
 # 5. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
 # ------------------------------------------------------------
-def get_color(score):
-    # Palette Finviz: Vert Foncé (Achat Fort) -> Rouge Foncé (Vente Forte)
-    if score >= 8.5: return "#064e3b" # Vert Foncé
-    if score >= 7.0: return "#15803d" # Vert
-    if score >= 6.0: return "#22c55e" # Vert Clair
-    if score >= 5.5: return "#4b5563" # Gris-Vert
+def get_color(pct_change):
+    """Palette de couleurs basée sur la variation % réelle"""
+    # Vert (positif)
+    if pct_change >= 0.50: return "#064e3b"   # Vert très foncé (>0.5%)
+    if pct_change >= 0.30: return "#15803d"   # Vert foncé (>0.3%)
+    if pct_change >= 0.15: return "#22c55e"   # Vert (>0.15%)
+    if pct_change >= 0.05: return "#4ade80"   # Vert clair (>0.05%)
+    if pct_change >= 0.01: return "#86efac"   # Vert très clair (>0.01%)
     
-    if score <= 1.5: return "#7f1d1d" # Rouge Foncé
-    if score <= 3.0: return "#b91c1c" # Rouge
-    if score <= 4.0: return "#ef4444" # Rouge Clair
-    if score <= 4.5: return "#4b5563" # Gris-Rouge
+    # Rouge (négatif)
+    if pct_change <= -0.50: return "#7f1d1d"  # Rouge très foncé (<-0.5%)
+    if pct_change <= -0.30: return "#b91c1c"  # Rouge foncé (<-0.3%)
+    if pct_change <= -0.15: return "#ef4444"  # Rouge (<-0.15%)
+    if pct_change <= -0.05: return "#f87171"  # Rouge clair (<-0.05%)
+    if pct_change <= -0.01: return "#fca5a5"  # Rouge très clair (<-0.01%)
     
-    return "#374151" # Gris Neutre
+    return "#4b5563"  # Gris neutre (proche de 0)
 
 def generate_full_html_report(df):
     """
@@ -345,14 +344,14 @@ def generate_full_html_report(df):
         
         # Ajouter toutes les tuiles
         for _, row in subset.iterrows():
-            score = row['score']
+            pct_change = row['pct_change']
             name = row['name']
-            bg_color = get_color(score)
+            bg_color = get_color(pct_change)
             
             tiles_html += f'''
             <div class="market-tile" style="background-color: {bg_color};">
                 <div class="tile-symbol">{name}</div>
-                <div class="tile-score">{score:.1f}</div>
+                <div class="tile-score">{pct_change:+.2f}%</div>
             </div>
             '''
         
@@ -365,7 +364,7 @@ def generate_full_html_report(df):
 # 6. APPLICATION STREAMLIT
 # ------------------------------------------------------------
 st.title("🗺️ Market Heatmap Pro")
-st.write("Analyse de force relative. Vert = Acheteur | Rouge = Vendeur.")
+st.write("Variations du marché en temps réel. Vert = Hausse | Rouge = Baisse")
 
 # Options dans la sidebar
 with st.sidebar:
