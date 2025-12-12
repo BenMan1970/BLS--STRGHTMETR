@@ -5,99 +5,100 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# 1. CONFIGURATION & STYLE (CSS MARKET MAP)
+# 1. CONFIGURATION VISUELLE (CSS)
 # ------------------------------------------------------------
-st.set_page_config(page_title="Forex Heatmap Pro", layout="wide")
+st.set_page_config(page_title="Market Heatmap", layout="wide")
 
 st.markdown("""
 <style>
-    /* Fond sombre */
-    .stApp { background-color: #121212; }
+    /* Fond sombre général */
+    .stApp { background-color: #0e1117; }
 
-    /* Conteneur Flex pour les tuiles (Alignement automatique) */
+    /* Conteneur principal Flexbox : Aligne les boîtes automatiquement */
     .heatmap-container {
         display: flex;
-        flex-wrap: wrap;
-        gap: 8px; /* Espace entre les tuiles */
+        flex-wrap: wrap;       /* Permet de passer à la ligne si pas de place */
+        gap: 6px;              /* Petit espace entre les tuiles */
         justify-content: flex-start;
-        padding: 10px 0;
+        padding-bottom: 20px;
     }
 
-    /* La TUILE (Le rectangle coloré) */
+    /* LA TUILE (Carte rectangulaire) */
     .market-tile {
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        width: 130px;  /* Largeur fixe pour alignement propre */
-        height: 70px;  /* Hauteur compacte */
-        border-radius: 4px;
+        width: 110px;          /* Largeur fixe compacte */
+        height: 60px;          /* Hauteur fixe compacte */
+        border-radius: 6px;
         color: white;
-        font-family: 'Arial', sans-serif;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-        transition: transform 0.2s;
-        border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+        border: 1px solid rgba(255,255,255,0.05);
+        transition: transform 0.1s;
     }
     
     .market-tile:hover {
         transform: scale(1.05);
-        z-index: 10;
-        border-color: white;
+        border-color: rgba(255,255,255,0.5);
         cursor: pointer;
     }
 
-    /* Texte dans la tuile */
+    /* Texte du Symbole (ex: EURUSD) */
     .tile-symbol {
+        font-family: 'Arial', sans-serif;
         font-weight: 800;
-        font-size: 15px;
-        letter-spacing: 0.5px;
-        margin-bottom: 4px;
-    }
-    
-    .tile-score {
         font-size: 13px;
-        font-weight: 400;
-        opacity: 0.9;
+        margin-bottom: 2px;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     
+    /* Texte du Score (ex: 8.5) */
+    .tile-score {
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        font-size: 14px;
+        background-color: rgba(0,0,0,0.2); /* Petit fond sombre sous le score */
+        padding: 0 6px;
+        border-radius: 4px;
+    }
+
     /* Titres de section */
-    .section-header {
+    .section-title {
         color: #8b949e;
-        font-size: 16px;
-        margin-top: 25px;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #333;
-        padding-bottom: 5px;
-        font-family: sans-serif;
+        font-size: 15px;
+        font-weight: bold;
+        margin: 15px 0 8px 0;
+        border-bottom: 1px solid #30363d;
+        display: inline-block;
+        padding-bottom: 2px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# LISTE COMPLETE DES PAIRES (Cross inclus)
+# ------------------------------------------------------------
+# 2. LISTE DES ACTIFS
+# ------------------------------------------------------------
 CONFIG = {
     'tickers': [
-        # MAJEURS
+        # --- FOREX (28 Paires Majeures & Mineures) ---
         'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
-        # CROSS EUR
         'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
-        # CROSS GBP
         'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
-        # CROSS AUD/NZD/CAD
         'AUDJPY=X', 'AUDCAD=X', 'AUDNZD=X', 'AUDCHF=X',
         'CADJPY=X', 'CADCHF=X', 'NZDJPY=X', 'NZDCHF=X', 'CHFJPY=X',
-        # INDICES
+        
+        # --- INDICES ---
         '^DJI', '^GSPC', '^IXIC', '^FCHI', '^GDAXI',
-        # COMMODITIES
-        'GC=F', 'CL=F'
+        
+        # --- MATIÈRES PREMIÈRES ---
+        'GC=F', 'CL=F', 'SI=F', 'HG=F'
     ],
-    'period': '60d', 
-    'interval': '1d', 
-    'lookback_days': 3,
-    'atr_period': 14
+    'period': '60d', 'interval': '1d', 'lookback_days': 3, 'atr_period': 14
 }
 
 # ------------------------------------------------------------
-# 2. MOTEUR DE CALCUL (Score 0-10)
+# 3. CALCULS (DATA PROCESSING)
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -108,13 +109,14 @@ def calculate_atr(df, period=14):
 
 def get_market_data(config):
     tickers = config['tickers']
-    # Téléchargement groupé pour la vitesse
+    # Téléchargement unique pour la performance
     data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
     
     results = {}
     
     for ticker in tickers:
         try:
+            # Gestion safe des données
             df = data[ticker].dropna()
             if len(df) < 20: continue
             
@@ -124,33 +126,28 @@ def get_market_data(config):
             
             if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
 
-            # Mouvement brut %
+            # Force Relative
             raw_move_pct = (price_now - price_past) / price_past
-            
-            # Ajustement Volatilité
             atr = calculate_atr(df, config['atr_period']).iloc[-1]
+            # Protection division par zéro ou ATR nul
             atr_pct = (atr / price_now) if price_now != 0 else 0.001
-            
-            # Force normalisée
             strength = raw_move_pct / max(atr_pct, 0.0001)
             
-            # Catégorisation simple
+            # Catégorisation
             if "=X" in ticker: cat = "FOREX"
             elif "=F" in ticker: cat = "COMMODITIES"
             elif "^" in ticker: cat = "INDICES"
             else: cat = "OTHER"
             
-            # Nettoyage nom
+            # Nom propre
             display_name = ticker.replace('=X','').replace('=F','').replace('^','')
-            # Mapping noms connus
-            name_map = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL'}
-            display_name = name_map.get(display_name, display_name)
+            mapping = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'}
+            display_name = mapping.get(display_name, display_name)
 
             results[ticker] = {
                 'name': display_name,
                 'raw_score': strength,
-                'category': cat,
-                'pct_change': raw_move_pct * 100
+                'category': cat
             }
         except KeyError:
             continue
@@ -159,7 +156,7 @@ def get_market_data(config):
 
     df_res = pd.DataFrame.from_dict(results, orient='index')
     
-    # Z-Score -> Note de 0 à 10
+    # Normalisation 0-10
     vals = df_res['raw_score'].values
     z = zscore(vals)
     z = np.clip(np.nan_to_num(z), -2.5, 2.5)
@@ -169,69 +166,72 @@ def get_market_data(config):
     return df_res.sort_values(by='score', ascending=False)
 
 # ------------------------------------------------------------
-# 3. GÉNÉRATEUR DE TUILES HTML
+# 4. RENDU HTML (FONCTIONS DE COULEUR)
 # ------------------------------------------------------------
-def get_color_for_score(score):
-    # Couleurs style "Finviz"
-    # Vert Foncé -> Vert Clair -> Gris (Neutre) -> Rouge Clair -> Rouge Foncé
-    if score >= 8.5: return "#006400" # Strongest Green
-    if score >= 7.0: return "#228B22" # Green
-    if score >= 6.0: return "#3CB371" # Medium Sea Green
-    if score >= 5.5: return "#3d4d3d" # Slight Greenish Grey
+def get_color(score):
+    # Palette Dégradé Rouge -> Gris -> Vert
+    if score >= 8.5: return "#064e3b" # Vert très foncé (Strong Buy)
+    if score >= 7.0: return "#166534" # Vert
+    if score >= 6.0: return "#22c55e" # Vert clair
+    if score >= 5.5: return "#4b5563" # Gris verdâtre
     
-    if score <= 1.5: return "#8B0000" # Strongest Red
-    if score <= 3.0: return "#B22222" # Firebrick
-    if score <= 4.0: return "#CD5C5C" # Indian Red
-    if score <= 4.5: return "#4d3d3d" # Slight Reddish Grey
+    if score <= 1.5: return "#7f1d1d" # Rouge très foncé (Strong Sell)
+    if score <= 3.0: return "#991b1b" # Rouge
+    if score <= 4.0: return "#ef4444" # Rouge clair
+    if score <= 4.5: return "#4b5563" # Gris rougeâtre
     
-    return "#2c2c2c" # Neutral Grey
+    return "#374151" # Gris Neutre
 
-def render_heatmap(df_subset):
+def render_section(title, df_subset):
+    """Génère le bloc HTML complet pour une section pour éviter les bugs d'affichage"""
+    if df_subset.empty: return
+    
+    # 1. Titre
+    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    
+    # 2. Construction du gros bloc HTML pour toutes les tuiles
     html_block = '<div class="heatmap-container">'
     
     for _, row in df_subset.iterrows():
         score = row['score']
         name = row['name']
+        bg_color = get_color(score)
         
-        bg_color = get_color_for_score(score)
-        
-        tile_html = f"""
+        # Le HTML de la tuile unique
+        tile = f"""
         <div class="market-tile" style="background-color: {bg_color};">
             <div class="tile-symbol">{name}</div>
             <div class="tile-score">{score:.1f}</div>
         </div>
         """
-        html_block += tile_html
+        html_block += tile
         
     html_block += '</div>'
+    
+    # 3. Rendu unique pour éviter le texte brut
     st.markdown(html_block, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 4. INTERFACE
+# 5. APP PRINCIPALE
 # ------------------------------------------------------------
-st.title("🗺️ Forex Market Map")
-st.write("Vue synthétique type 'Heatmap'. Vert = Hausse (Acheteur), Rouge = Baisse (Vendeur).")
+st.title("🗺️ Market Heatmap Pro")
 
-if st.button("🔄 Scanner le Marché", type="primary"):
-    with st.spinner("Analyse des flux..."):
-        df = get_market_data(CONFIG)
+if st.button("🔄 SCANNER LE MARCHÉ", type="primary"):
+    with st.spinner("Analyse de la force relative (Forex, Indices, Métaux)..."):
+        df_final = get_market_data(CONFIG)
         
-        if not df.empty:
+        if not df_final.empty:
             
-            # --- SECTION FOREX ---
-            st.markdown('<div class="section-header">💱 FOREX (Majeurs & Cross)</div>', unsafe_allow_html=True)
-            fx_data = df[df['category'] == 'FOREX']
-            render_heatmap(fx_data)
+            # Affichage par blocs
+            fx = df_final[df_final['category'] == 'FOREX']
+            indices = df_final[df_final['category'] == 'INDICES']
+            commodities = df_final[df_final['category'] == 'COMMODITIES']
             
-            # --- SECTION INDICES ---
-            st.markdown('<div class="section-header">📊 INDICES & ACTIONS</div>', unsafe_allow_html=True)
-            ind_data = df[df['category'] == 'INDICES']
-            render_heatmap(ind_data)
-            
-            # --- SECTION COMMODITIES ---
-            st.markdown('<div class="section-header">🪙 MATIÈRES PREMIÈRES</div>', unsafe_allow_html=True)
-            com_data = df[df['category'] == 'COMMODITIES']
-            render_heatmap(com_data)
+            render_section("💱 FOREX (Paires Majeures & Croisées)", fx)
+            render_section("📊 INDICES MONDIAUX", indices)
+            render_section("🪙 MATIÈRES PREMIÈRES", commodities)
             
         else:
-            st.error("Aucune donnée récupérée. Vérifiez votre connexion.")
+            st.error("Erreur de connexion aux données. Réessayez.")
+else:
+    st.info("Cliquez sur le bouton pour générer la Heatmap.")
