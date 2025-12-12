@@ -5,87 +5,122 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# 1. CONFIGURATION & STYLE (CSS VISUEL)
+# 1. CONFIGURATION & STYLES (COMPACT & GRID)
 # ------------------------------------------------------------
-st.set_page_config(page_title="Strength Meter PRO", layout="wide", page_icon="📈")
+st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
 
-# CSS : C'est ici que la magie visuelle opère (Barres, alignement, couleurs)
 st.markdown("""
 <style>
-    /* Fond général sombre */
-    .stApp { background-color: #0e1117; }
-    
-    /* Conteneur de la jauge */
-    .gauge-container {
-        display: flex;
-        flex-direction: row; /* Force l'alignement horizontal */
-        align-items: center;
-        gap: 4px; /* Espace entre les segments */
-        height: 24px;
-        width: 100%;
-        padding-top: 5px;
+    /* Fond global */
+    .stApp { background-color: #0b0e11; }
+
+    /* Style de la "Carte" pour chaque actif */
+    .metric-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        transition: transform 0.2s;
     }
-    
-    /* Les segments (rectangles colorés) */
-    .segment {
-        flex: 1; /* Prend toute la largeur dispo */
-        height: 100%;
-        border-radius: 3px;
-        transition: all 0.3s ease;
+    .metric-card:hover {
+        border-color: #58a6ff;
+        transform: translateY(-2px);
     }
 
-    /* Texte des actifs (Symboles) */
-    .ticker-text {
-        font-family: 'Arial', sans-serif;
-        font-weight: 900;
-        font-size: 18px;
-        color: #f0f2f6;
+    /* En-tête de la carte (Symbole et Score) */
+    .card-header {
         display: flex;
+        justify-content: space-between;
         align-items: center;
-        height: 100%;
+        margin-bottom: 6px;
     }
-
-    /* Score à droite */
+    .symbol-text {
+        font-family: 'Roboto', sans-serif;
+        font-weight: 700;
+        font-size: 14px;
+        color: #e6edf3;
+    }
     .score-text {
         font-family: 'Courier New', monospace;
         font-weight: bold;
-        font-size: 18px;
-        text-align: right;
+        font-size: 14px;
+    }
+
+    /* Conteneur de la jauge compacte */
+    .gauge-container {
+        display: flex;
+        flex-direction: row;
+        gap: 2px; /* Espace très fin */
+        height: 8px; /* Hauteur réduite pour compacité */
+        width: 100%;
+        margin-top: 4px;
+        position: relative;
+    }
+
+    .segment {
+        flex: 1;
+        height: 100%;
+        border-radius: 2px;
+    }
+
+    /* Le curseur triangle (adapté à la petite taille) */
+    .cursor-marker {
+        position: absolute;
+        top: 10px; /* Juste sous la barre */
+        width: 0; 
+        height: 0; 
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-bottom: 5px solid #fff;
+        transform: translateX(-50%);
+        transition: left 0.4s ease-out;
     }
     
-    /* Ligne de séparation fine */
-    hr { margin: 0.5em 0; border-color: #30363d; opacity: 0.4; }
+    /* Sections */
+    .section-title {
+        color: #8b949e;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin: 20px 0 10px 0;
+        border-bottom: 1px solid #30363d;
+        padding-bottom: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Configuration des actifs
+# Liste complète (Forex Majeurs + Cross + Indices + Métaux)
 CONFIG = {
     'tickers': {
-        'EURUSD=X': [20.0, 'EUR', 'USD', 'FX'],
-        'USDJPY=X': [15.0, 'USD', 'JPY', 'FX'],
-        'GBPUSD=X': [10.0, 'GBP', 'USD', 'FX'],
-        'AUDUSD=X': [6.0, 'AUD', 'USD', 'FX'],
-        'USDCAD=X': [5.0, 'USD', 'CAD', 'FX'],
-        'USDCHF=X': [4.0, 'USD', 'CHF', 'FX'],
-        'NZDUSD=X': [3.0, 'NZD', 'USD', 'FX'],
-        'EURGBP=X': [3.0, 'EUR', 'GBP', 'FX'],
-        'EURJPY=X': [3.0, 'EUR', 'JPY', 'FX'],
-        'GBPJPY=X': [3.0, 'GBP', 'JPY', 'FX'],
-        'AUDJPY=X': [2.0, 'AUD', 'JPY', 'FX'],
-        'EURAUD=X': [2.0, 'EUR', 'AUD', 'FX'],
-        'EURCHF=X': [2.0, 'EUR', 'CHF', 'FX'],
-        'GC=F': [8.0, 'XAU', 'USD', 'METAL'],
-        'PL=F': [2.0, 'XPT', 'USD', 'METAL'],
-        '^DJI': [8.0, 'US30', 'USD', 'INDEX'],
-        '^IXIC': [8.0, 'NAS100', 'USD', 'INDEX'],
-        '^GSPC': [10.0, 'SPX500', 'USD', 'INDEX']
+        # --- MAJEURS & MINEURS (FOREX) ---
+        'EURUSD=X': 'FX', 'GBPUSD=X': 'FX', 'USDJPY=X': 'FX', 'USDCHF=X': 'FX',
+        'AUDUSD=X': 'FX', 'USDCAD=X': 'FX', 'NZDUSD=X': 'FX',
+        'EURGBP=X': 'FX', 'EURJPY=X': 'FX', 'EURCHF=X': 'FX', 'EURAUD=X': 'FX',
+        'GBPJPY=X': 'FX', 'GBPCHF=X': 'FX', 'AUDJPY=X': 'FX', 'CADJPY=X': 'FX',
+        'CHFJPY=X': 'FX', 'AUDCAD=X': 'FX', 'AUDNZD=X': 'FX', 'NZDJPY=X': 'FX',
+        
+        # --- INDICES ---
+        '^DJI': 'INDICES',      # Dow Jones
+        '^GSPC': 'INDICES',     # S&P 500
+        '^IXIC': 'INDICES',     # Nasdaq
+        '^FCHI': 'INDICES',     # CAC 40
+        '^GDAXI': 'INDICES',    # DAX
+        
+        # --- MATIERES PREMIERES ---
+        'GC=F': 'COMMODITIES',  # Gold
+        'SI=F': 'COMMODITIES',  # Silver
+        'CL=F': 'COMMODITIES',  # Crude Oil
+        'HG=F': 'COMMODITIES'   # Copper
     },
-    'period': '60d', 'interval': '1d', 'lookback_days': 3,
-    'atr_period': 14, 'atr_floor_pct': 1e-4, 'smoothing_span': 3
+    'period': '60d', 'interval': '1d', 
+    'lookback_days': 3,  # Momentum sur 3 jours
+    'atr_period': 14
 }
 
 # ------------------------------------------------------------
-# 2. FONCTIONS DE CALCUL (MOTEUR)
+# 2. CALCULS (Score par PAIRE)
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -94,151 +129,167 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
-def compute_strength(config=CONFIG):
-    tickers_cfg = config['tickers']
-    all_tickers = list(tickers_cfg.keys())
+def compute_pair_strength(config=CONFIG):
+    tickers_map = config['tickers']
+    tickers_list = list(tickers_map.keys())
     
-    # Téléchargement optimisé
-    data = yf.download(all_tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
-
-    entities = set()
-    for t, v in tickers_cfg.items():
-        entities.add(v[1]); entities.add(v[2])
-
-    scores_acc = {e: {'weighted_sum': 0, 'total_weight': 0} for e in entities}
-
-    for ticker, info in tickers_cfg.items():
-        weight, base, quote, _ = info
-        # Gestion des cas où le ticker n'est pas trouvé
-        if ticker not in data.columns.get_level_values(0): continue
-        
-        df = data[ticker].dropna()
-        if len(df) < 20: continue
-
-        close = df['Close']
-        price_now = close.iloc[-1]
-        price_past = close.shift(config['lookback_days']).iloc[-1]
-        
-        if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
-
-        raw_move_pct = (price_now - price_past) / price_past
-        atr = calculate_atr(df, config['atr_period']).iloc[-1]
-        atr_pct = max(atr / price_now, config['atr_floor_pct']) if price_now != 0 else config['atr_floor_pct']
-        
-        strength = raw_move_pct / atr_pct
-
-        scores_acc[base]['weighted_sum'] += strength * weight
-        scores_acc[base]['total_weight'] += weight
-        scores_acc[quote]['weighted_sum'] -= strength * weight
-        scores_acc[quote]['total_weight'] += weight
-
-    raw_values = {k: v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0 for k, v in scores_acc.items()}
+    # Téléchargement groupé
+    data = yf.download(tickers_list, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
     
-    # Normalisation
-    df_raw = pd.DataFrame.from_dict(raw_values, orient='index', columns=['raw'])
-    vals = df_raw['raw'].values
-    z = zscore(vals, nan_policy='omit') if np.std(vals) > 0 else np.zeros_like(vals)
-    z = np.clip(np.nan_to_num(z), -3, 3) 
+    results = {}
     
-    # Score final 0-10
-    df_raw['score'] = np.clip(5 + (z / 6) * 10, 0, 10)
-    df_raw['score_smoothed'] = df_raw['score'].ewm(span=config['smoothing_span']).mean()
+    for ticker in tickers_list:
+        try:
+            # Gestion des colonnes MultiIndex
+            df = data[ticker].dropna()
+            if len(df) < 20: continue
+            
+            close = df['Close']
+            price_now = close.iloc[-1]
+            price_past = close.shift(config['lookback_days']).iloc[-1]
+            
+            if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
+
+            # 1. Calcul du mouvement brut (%)
+            raw_move_pct = (price_now - price_past) / price_past
+            
+            # 2. Normalisation par la volatilité (ATR)
+            # Pour comparer le mouvement de l'Or vs l'EURUSD équitablement
+            atr = calculate_atr(df, config['atr_period']).iloc[-1]
+            atr_pct = (atr / price_now) if price_now != 0 else 0.001
+            atr_pct = max(atr_pct, 0.0001) # Sécurité division par zéro
+            
+            normalized_strength = raw_move_pct / atr_pct
+            
+            results[ticker] = {
+                'raw_score': normalized_strength,
+                'category': tickers_map[ticker]
+            }
+        except KeyError:
+            continue
+
+    if not results:
+        return pd.DataFrame()
+
+    df_res = pd.DataFrame.from_dict(results, orient='index')
     
-    return df_raw.sort_values(by='score_smoothed', ascending=False)
+    # 3. Z-Score global pour obtenir une note de 0 à 10
+    # 0 = Très Vendeur, 5 = Neutre, 10 = Très Acheteur
+    vals = df_res['raw_score'].values
+    z = zscore(vals)
+    z = np.clip(np.nan_to_num(z), -2.5, 2.5) # On clip à 2.5 écarts types
+    
+    # Transformation Z (-2.5 à 2.5) vers (0 à 10)
+    df_res['score'] = 5 + (z / 5) * 10 
+    df_res['score'] = df_res['score'].clip(0, 10)
+    
+    # Nettoyage du nom du ticker pour l'affichage (retirer =X, =F...)
+    df_res['display_name'] = df_res.index.str.replace('=X','').str.replace('=F','').str.replace('^','')
+    
+    # Remplacer les noms cryptiques par des noms communs
+    names_map = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX40', 'GC':'GOLD', 'SI':'SILVER', 'CL':'OIL', 'HG':'COPPER'}
+    df_res['display_name'] = df_res['display_name'].replace(names_map)
+    
+    return df_res.sort_values(by='score', ascending=False)
 
 # ------------------------------------------------------------
-# 3. GÉNÉRATEUR HTML DE LA JAUGE (CORRIGÉ)
+# 3. VISUEL HTML (Version "Micro")
 # ------------------------------------------------------------
-def get_gauge_html(score):
-    # Palette Dégradé: Rouge -> Orange -> Jaune -> Vert
+def get_mini_gauge(score):
+    # Palette Dégradé: Rouge (0) -> Gris (5) -> Vert (10)
+    # Pour le trading de paires : Rouge = Baisse, Vert = Hausse
     colors = [
-        "#ff3333", "#ff6633", "#ff9933", "#ffcc33", 
-        "#ffff33", "#ccff33", "#99ff33", "#66ff33", 
-        "#33ff33", "#00ff33"
+        "#ff2b2b", "#ff5252", "#ff7b7b", "#ffa3a3", # Bearish (Red)
+        "#4a4f55", "#4a4f55",                       # Neutral (Grey)
+        "#85e085", "#5cd65c", "#33cc33", "#00b300"  # Bullish (Green)
     ]
     
-    # Clamp score
-    score = max(0, min(10, score))
+    score_int = int(round(score))
+    score_int = max(0, min(9, score_int)) # Index 0-9
     
     segments = ""
     for i in range(10):
-        color = colors[i]
-        # Si le score dépasse cet index, on allume, sinon on éteint
-        opacity = "1.0" if score >= (i + 0.5) else "0.15"
-        # Ajout d'une ombre ("Glow") si allumé pour effet néon
-        shadow = f"0 0 8px {color}" if opacity == "1.0" else "none"
+        # Couleur dynamique selon la position dans l'échelle
+        base_color = colors[i]
         
-        segments += f'<div class="segment" style="background:{color}; opacity:{opacity}; box-shadow:{shadow};"></div>'
+        # Logique d'allumage : On allume tout ce qui est "avant" le score pour faire une barre de progression ?
+        # NON, pour un indicateur type RSI/Force, on veut souvent voir l'intensité.
+        # Approche "Equalizer" :
+        
+        # Opacité : Allumé si i <= score (Barre pleine)
+        opacity = "1.0" if i <= score else "0.15"
+        
+        # Si c'est neutre (milieu), on garde gris foncé
+        bg = base_color
+        
+        # Effet Néon seulement sur les segments allumés actifs
+        shadow = f"0 0 5px {bg}" if opacity == "1.0" else "none"
+        
+        segments += f'<div class="segment" style="background:{bg}; opacity:{opacity}; box-shadow:{shadow};"></div>'
     
-    # Curseur triangle sous la barre
     cursor_pos = (score / 10) * 100
-    cursor_html = f"""
-    <div style="position:absolute; bottom:-6px; left:{cursor_pos}%; transform:translateX(-50%); width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:8px solid #fff;"></div>
-    """
     
     return f"""
-    <div style="position:relative; width:100%;">
+    <div style="position:relative;">
         <div class="gauge-container">{segments}</div>
-        {cursor_html}
+        <div class="cursor-marker" style="left:{cursor_pos}%;"></div>
     </div>
     """
 
 # ------------------------------------------------------------
-# 4. AFFICHAGE STREAMLIT
+# 4. RENDU STREAMLIT (GRID)
 # ------------------------------------------------------------
 
-st.title("⚡ MARKET STRENGTH METER")
+st.title("🌐 Global Market Pulse")
+st.write("Analyse de momentum cross-assets (Paires, Indices, Métaux).")
 
-if st.button("🔄 ACTUALISER LE MARCHÉ", type="primary"):
-    with st.spinner("Analyse des flux en cours..."):
-        try:
-            df = compute_strength()
+if st.button("Actualiser les données", type="primary"):
+    with st.spinner("Analyse du marché..."):
+        df = compute_pair_strength()
+        
+        if not df.empty:
             
-            # --- HEADER DASHBOARD ---
-            strongest = df.index[0]
-            weakest = df.index[-1]
-            
-            col_dash1, col_dash2, col_dash3 = st.columns(3)
-            col_dash1.success(f"🚀 Leader: {strongest}")
-            col_dash2.error(f"💀 Laggard: {weakest}")
-            col_dash3.info(f"💡 Trade: Long {strongest} / Short {weakest}")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # --- TABLEAU VISUEL (LA BOUCLE MAGIQUE) ---
-            # En-têtes
-            h1, h2, h3 = st.columns([1, 6, 1])
-            h1.markdown("### Asset")
-            h2.markdown("### Power")
-            h3.markdown("### Score")
-            st.divider()
+            # Fonction pour afficher une grille d'une catégorie donnée
+            def display_category(category_name, filter_key):
+                subset = df[df['category'] == filter_key]
+                if subset.empty: return
+                
+                st.markdown(f"<div class='section-title'>{category_name}</div>", unsafe_allow_html=True)
+                
+                # Création de 4 colonnes
+                cols = st.columns(4)
+                
+                for idx, (ticker, row) in enumerate(subset.iterrows()):
+                    score = row['score']
+                    name = row['display_name']
+                    
+                    # Couleur du texte du score
+                    if score >= 7: score_color = "#00e676" # Vert vif
+                    elif score <= 3: score_color = "#ff5252" # Rouge vif
+                    else: score_color = "#b0b0b0" # Gris
+                    
+                    # Choix de la colonne (0, 1, 2, 3)
+                    col_idx = idx % 4
+                    
+                    with cols[col_idx]:
+                        gauge_html = get_mini_gauge(score)
+                        
+                        # Carte HTML complète
+                        card_html = f"""
+                        <div class="metric-card">
+                            <div class="card-header">
+                                <span class="symbol-text">{name}</span>
+                                <span class="score-text" style="color:{score_color}">{score:.1f}</span>
+                            </div>
+                            {gauge_html}
+                        </div>
+                        """
+                        st.markdown(card_html, unsafe_allow_html=True)
 
-            # Boucle d'affichage ligne par ligne
-            for asset, row in df.iterrows():
-                score = row['score_smoothed']
-                
-                # Colonnes : Nom | Jauge | Score
-                c1, c2, c3 = st.columns([1, 6, 1])
-                
-                with c1:
-                    # Affichage du Nom
-                    st.markdown(f'<div class="ticker-text">{asset}</div>', unsafe_allow_html=True)
-                
-                with c2:
-                    # Affichage de la Jauge (C'est ICI que le HTML est rendu)
-                    html_bar = get_gauge_html(score)
-                    st.markdown(html_bar, unsafe_allow_html=True)
-                
-                with c3:
-                    # Affichage du Score coloré
-                    color = "#00ff33" if score > 7 else ("#ff3333" if score < 3 else "#ffffff")
-                    st.markdown(f'<div class="score-text" style="color:{color};">{score:.2f}</div>', unsafe_allow_html=True)
-                
-                # Petit espace entre les lignes
-                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-                st.markdown("<hr>", unsafe_allow_html=True)
+            # Affichage par catégories
+            display_category("📊 Indices & Actions", "INDICES")
+            display_category("🪙 Matières Premières", "COMMODITIES")
+            display_category("💱 Forex (Majeurs & Cross)", "FX")
 
-        except Exception as e:
-            st.error(f"Erreur: {e}")
 else:
-    st.info("Cliquez sur Actualiser pour charger les données.")
+    st.info("Cliquez sur le bouton pour scanner les marchés.")
