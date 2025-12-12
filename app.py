@@ -5,83 +5,99 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# 1. STYLE CSS
+# CONFIGURATION
 # ------------------------------------------------------------
-st.set_page_config(page_title="Forex Currency Matrix", layout="wide")
+st.set_page_config(page_title="Forex Market Map", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; }
-    
-    .matrix-container {
-        display: inline-block;
-        margin: 20px 0;
-    }
-    
-    .matrix-table {
-        border-collapse: collapse;
+    .stApp { 
+        background-color: #f8f9fa;
         font-family: Arial, sans-serif;
     }
     
-    .matrix-cell {
-        width: 100px;
-        height: 50px;
-        text-align: center;
-        vertical-align: middle;
-        border: 1px solid rgba(255,255,255,0.1);
-        transition: transform 0.2s;
-    }
-    
-    .matrix-cell:hover {
-        transform: scale(1.05);
-        border-color: rgba(255,255,255,0.5);
-        cursor: pointer;
-        z-index: 10;
-        position: relative;
-    }
-    
-    .cell-pair {
+    .main-title {
+        font-size: 28px;
         font-weight: 700;
-        font-size: 11px;
-        display: block;
-        margin-bottom: 3px;
+        color: #000;
+        margin-bottom: 10px;
     }
     
-    .cell-value {
-        font-weight: 600;
-        font-size: 13px;
-        font-family: 'Courier New', monospace;
+    .date-info {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 20px;
     }
     
-    .header-cell {
-        background-color: #1a1a1a;
-        color: #8b949e;
+    .matrix-grid {
+        display: grid;
+        grid-template-columns: 80px repeat(8, 150px);
+        gap: 0;
+        margin: 20px 0;
+        width: fit-content;
+    }
+    
+    .currency-header {
+        background-color: #e8e8e8;
+        border: 1px solid #d0d0d0;
+        padding: 15px;
+        text-align: center;
         font-weight: 700;
         font-size: 14px;
-        width: 100px;
-        height: 50px;
+        color: #333;
+    }
+    
+    .pair-cell {
+        border: 1px solid rgba(0,0,0,0.1);
+        padding: 10px;
         text-align: center;
-        vertical-align: middle;
-        border: 1px solid rgba(255,255,255,0.1);
+        cursor: pointer;
+        transition: all 0.2s;
+        min-height: 60px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .pair-cell:hover {
+        transform: scale(1.05);
+        z-index: 10;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    
+    .pair-name {
+        font-weight: 700;
+        font-size: 12px;
+        margin-bottom: 4px;
+        color: white;
+    }
+    
+    .pair-value {
+        font-weight: 600;
+        font-size: 13px;
+        color: white;
+    }
+    
+    .empty-cell {
+        background-color: #f0f0f0;
+        border: 1px solid #d0d0d0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------
-# 2. CONFIGURATION
-# ------------------------------------------------------------
 CONFIG = {
     'period': '60d',
     'interval': '1d',
-    'lookback_days': 3,
+    'lookback_days': 1,
     'atr_period': 14
 }
 
-# Devises principales pour la matrice
-CURRENCIES = ['EUR', 'USD', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD']
+# Ordre exact de l'image
+CURRENCIES = ['EUR', 'USD', 'CAD', 'CHF', 'NZD', 'AUD', 'JPY', 'GBP']
 
 # ------------------------------------------------------------
-# 3. MOTEUR DE CALCUL
+# MOTEUR DE CALCUL
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -91,253 +107,222 @@ def calculate_atr(df, period=14):
     return tr.rolling(window=period, min_periods=1).mean()
 
 def get_pair_ticker(base, quote):
-    """Convertit une paire de devises en ticker Yahoo Finance"""
+    """Convertit une paire en ticker Yahoo Finance"""
     pair = f"{base}{quote}"
-    # Mappings spéciaux
-    if pair in ['EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD']:
-        return f"{pair}=X"
-    elif pair in ['USDJPY', 'USDCHF', 'USDCAD']:
-        return f"{pair}=X"
-    else:
-        return f"{pair}=X"
+    return f"{pair}=X"
 
 def calculate_pair_strength(base, quote, config):
-    """Calcule la force relative d'une paire"""
+    """Calcule la variation % d'une paire"""
     ticker = get_pair_ticker(base, quote)
     
     try:
         df = yf.download(ticker, period=config['period'], interval=config['interval'], progress=False)
         if df.empty or len(df) < 20:
-            return None
+            # Essayer l'inverse
+            ticker_inv = get_pair_ticker(quote, base)
+            df = yf.download(ticker_inv, period=config['period'], interval=config['interval'], progress=False)
+            if df.empty or len(df) < 20:
+                return None
+            inverse = True
+        else:
+            inverse = False
             
         close = df['Close']
         price_now = close.iloc[-1]
-        price_past = close.shift(config['lookback_days']).iloc[-1]
+        price_past = close.iloc[-2]  # Jour précédent
         
         if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
             return None
 
-        # Calcul de la force
-        raw_move_pct = (price_now - price_past) / price_past
-        atr = calculate_atr(df, config['atr_period']).iloc[-1]
-        atr_pct = (atr / price_now) if price_now != 0 else 0.001
-        strength = raw_move_pct / max(atr_pct, 0.0001)
+        # Calcul variation %
+        pct_change = ((price_now - price_past) / price_past) * 100
         
-        return {
-            'raw_score': strength,
-            'pct_change': raw_move_pct * 100
-        }
+        if inverse:
+            pct_change = -pct_change
+        
+        return pct_change
     except:
         return None
 
 def get_all_pairs_data(currencies, config):
-    """Récupère toutes les données des paires"""
+    """Récupère toutes les variations"""
     results = {}
+    total = len(currencies) * len(currencies)
+    current = 0
     
-    with st.spinner("Téléchargement des données..."):
-        progress_bar = st.progress(0)
-        total = len(currencies) * len(currencies)
-        current = 0
-        
-        for base in currencies:
-            for quote in currencies:
-                if base == quote:
-                    results[(base, quote)] = None
-                else:
-                    data = calculate_pair_strength(base, quote, config)
-                    results[(base, quote)] = data
-                
-                current += 1
-                progress_bar.progress(current / total)
-        
-        progress_bar.empty()
+    progress_bar = st.progress(0)
+    status = st.empty()
     
-    return results
-
-def normalize_scores(results):
-    """Normalise les scores sur 0-10"""
-    valid_scores = [v['raw_score'] for v in results.values() if v is not None]
+    for i, base in enumerate(currencies):
+        for j, quote in enumerate(currencies):
+            if base == quote:
+                results[(i, j)] = None
+            else:
+                status.text(f"Analyse {base}/{quote}...")
+                pct = calculate_pair_strength(base, quote, config)
+                results[(i, j)] = pct
+            
+            current += 1
+            progress_bar.progress(current / total)
     
-    if not valid_scores:
-        return results
-    
-    z = zscore(valid_scores)
-    z = np.clip(np.nan_to_num(z), -2.5, 2.5)
-    normalized = 5 + (z / 5) * 10
-    normalized = np.clip(normalized, 0, 10)
-    
-    idx = 0
-    for key in results:
-        if results[key] is not None:
-            results[key]['score'] = normalized[idx]
-            idx += 1
+    progress_bar.empty()
+    status.empty()
     
     return results
 
-# ------------------------------------------------------------
-# 4. GÉNÉRATEUR DE MATRICE HTML
-# ------------------------------------------------------------
-def get_color(score):
-    """Palette de couleurs basée sur le score"""
-    if score is None:
-        return "#1a1a1a"
+def get_color_from_pct(pct):
+    """Couleurs basées sur le pourcentage de variation"""
+    if pct is None:
+        return "#e8e8e8"
     
-    if score >= 8.5: return "#064e3b"  # Vert Foncé
-    if score >= 7.0: return "#15803d"  # Vert
-    if score >= 6.0: return "#22c55e"  # Vert Clair
-    if score >= 5.5: return "#4b5563"  # Gris-Vert
+    # Vert (positif)
+    if pct >= 0.20: return "#006400"    # Vert très foncé
+    if pct >= 0.15: return "#228B22"    # Vert foncé
+    if pct >= 0.10: return "#32CD32"    # Vert
+    if pct >= 0.05: return "#90EE90"    # Vert clair
+    if pct >= 0.01: return "#98FB98"    # Vert très clair
     
-    if score <= 1.5: return "#7f1d1d"  # Rouge Foncé
-    if score <= 3.0: return "#b91c1c"  # Rouge
-    if score <= 4.0: return "#ef4444"  # Rouge Clair
-    if score <= 4.5: return "#4b5563"  # Gris-Rouge
+    # Rouge (négatif)
+    if pct <= -0.20: return "#8B0000"   # Rouge très foncé
+    if pct <= -0.15: return "#B22222"   # Rouge foncé
+    if pct <= -0.10: return "#DC143C"   # Rouge
+    if pct <= -0.05: return "#FF6347"   # Rouge clair
+    if pct <= -0.01: return "#FFA07A"   # Rouge très clair
     
-    return "#374151"  # Gris Neutre
+    return "#D3D3D3"  # Gris neutre
 
-def generate_currency_matrix(currencies, data):
-    """Génère la matrice HTML des devises"""
-    html = '<div class="matrix-container"><table class="matrix-table">'
+# ------------------------------------------------------------
+# GÉNÉRATEUR HTML
+# ------------------------------------------------------------
+def generate_matrix_html(currencies, data):
+    """Génère la matrice exactement comme l'image"""
+    html = '<div class="matrix-grid">'
     
-    # Ligne d'en-tête
-    html += '<tr><td class="header-cell"></td>'
-    for quote in currencies:
-        html += f'<td class="header-cell">{quote}</td>'
-    html += '</tr>'
+    # Première ligne : en-têtes des colonnes (devises quote)
+    html += '<div class="currency-header"></div>'  # Coin vide
+    for currency in currencies:
+        html += f'<div class="currency-header">{currency}</div>'
     
     # Lignes de données
-    for base in currencies:
-        html += f'<tr><td class="header-cell">{base}</td>'
+    for i, base in enumerate(currencies):
+        # En-tête de ligne (devise base)
+        html += f'<div class="currency-header">{base}</div>'
         
-        for quote in currencies:
-            if base == quote:
-                # Cellule diagonale
-                html += f'<td class="matrix-cell header-cell">{base}</td>'
+        # Cellules de paires
+        for j, quote in enumerate(currencies):
+            if i == j:
+                # Cellule diagonale (devise contre elle-même)
+                html += f'<div class="pair-cell empty-cell"><span style="color: #333; font-weight: 700;">{base}</span></div>'
             else:
-                pair_data = data.get((base, quote))
+                pct = data.get((i, j))
                 
-                if pair_data is None:
-                    html += '<td class="matrix-cell" style="background-color: #1a1a1a; color: #666;">-</td>'
+                if pct is None:
+                    html += '<div class="pair-cell empty-cell"><span style="color: #999;">unch</span></div>'
                 else:
-                    score = pair_data.get('score', 5)
-                    pct = pair_data.get('pct_change', 0)
-                    color = get_color(score)
+                    color = get_color_from_pct(pct)
+                    pair_name = f"{base}/{quote}"
                     
                     html += f'''
-                    <td class="matrix-cell" style="background-color: {color}; color: white;">
-                        <span class="cell-pair">{base}/{quote}</span>
-                        <span class="cell-value">{pct:+.2f}%</span>
-                    </td>
+                    <div class="pair-cell" style="background-color: {color};">
+                        <div class="pair-name">{pair_name}</div>
+                        <div class="pair-value">{pct:+.2f}%</div>
+                    </div>
                     '''
         
-        html += '</tr>'
-    
-    html += '</table></div>'
+    html += '</div>'
     return html
 
 # ------------------------------------------------------------
-# 5. APPLICATION STREAMLIT
+# APPLICATION
 # ------------------------------------------------------------
-st.title("💱 Forex Currency Strength Matrix")
-st.write("Matrice de force des devises. Vert = Force relative | Rouge = Faiblesse relative")
+st.markdown('<div class="main-title">Forex Market Map</div>', unsafe_allow_html=True)
 
-col1, col2 = st.columns([1, 3])
+from datetime import datetime
+today = datetime.now().strftime("%a, %b %dth, %Y")
+st.markdown(f'<div class="date-info">{today}</div>', unsafe_allow_html=True)
 
-with col1:
-    st.markdown("### Paramètres")
-    lookback = st.slider("Période d'analyse (jours)", 1, 10, CONFIG['lookback_days'])
-    CONFIG['lookback_days'] = lookback
-
-if st.button("🚀 ANALYSER LE MARCHÉ", type="primary"):
-    # Récupération des données
-    data = get_all_pairs_data(CURRENCIES, CONFIG)
-    
-    # Normalisation
-    data = normalize_scores(data)
-    
-    # Génération et affichage
-    matrix_html = generate_currency_matrix(CURRENCIES, data)
-    
-    st.components.v1.html(
-        f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{
-                    margin: 0;
-                    padding: 20px;
-                    background-color: transparent;
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                }}
-                .matrix-container {{
-                    display: inline-block;
-                    margin: 0 auto;
-                }}
-                .matrix-table {{
-                    border-collapse: collapse;
-                    font-family: Arial, sans-serif;
-                }}
-                .matrix-cell {{
-                    width: 100px;
-                    height: 50px;
-                    text-align: center;
-                    vertical-align: middle;
-                    border: 1px solid rgba(255,255,255,0.1);
-                    transition: transform 0.2s;
-                }}
-                .matrix-cell:hover {{
-                    transform: scale(1.05);
-                    border-color: rgba(255,255,255,0.5);
-                    cursor: pointer;
-                    z-index: 10;
-                    position: relative;
-                }}
-                .cell-pair {{
-                    font-weight: 700;
-                    font-size: 11px;
-                    display: block;
-                    margin-bottom: 3px;
-                }}
-                .cell-value {{
-                    font-weight: 600;
-                    font-size: 13px;
-                    font-family: 'Courier New', monospace;
-                }}
-                .header-cell {{
-                    background-color: #1a1a1a;
-                    color: #8b949e;
-                    font-weight: 700;
-                    font-size: 14px;
-                    width: 100px;
-                    height: 50px;
-                    text-align: center;
-                    vertical-align: middle;
-                    border: 1px solid rgba(255,255,255,0.1);
-                }}
-            </style>
-        </head>
-        <body>
-            {matrix_html}
-        </body>
-        </html>
-        """,
-        height=550,
-        scrolling=False
-    )
-    
-    # Légende
-    st.markdown("---")
-    st.markdown("""
-    **Comment lire la matrice :**
-    - 🟢 **Vert** : La devise de base (ligne) est forte par rapport à la devise de cotation (colonne)
-    - 🔴 **Rouge** : La devise de base (ligne) est faible par rapport à la devise de cotation (colonne)
-    - Le pourcentage indique la variation sur la période choisie
-    """)
+if st.button("🔄 Actualiser les données", type="primary"):
+    with st.spinner("Chargement des données du marché..."):
+        # Récupération des données
+        data = get_all_pairs_data(CURRENCIES, CONFIG)
+        
+        # Génération de la matrice
+        matrix_html = generate_matrix_html(CURRENCIES, data)
+        
+        # Affichage
+        st.components.v1.html(
+            f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{
+                        margin: 0;
+                        padding: 20px;
+                        background-color: #f8f9fa;
+                        font-family: Arial, sans-serif;
+                    }}
+                    .matrix-grid {{
+                        display: grid;
+                        grid-template-columns: 80px repeat(8, 150px);
+                        gap: 0;
+                        margin: 0;
+                        width: fit-content;
+                    }}
+                    .currency-header {{
+                        background-color: #e8e8e8;
+                        border: 1px solid #d0d0d0;
+                        padding: 15px;
+                        text-align: center;
+                        font-weight: 700;
+                        font-size: 14px;
+                        color: #333;
+                    }}
+                    .pair-cell {{
+                        border: 1px solid rgba(0,0,0,0.1);
+                        padding: 10px;
+                        text-align: center;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                        min-height: 60px;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                        align-items: center;
+                    }}
+                    .pair-cell:hover {{
+                        transform: scale(1.05);
+                        z-index: 10;
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    }}
+                    .pair-name {{
+                        font-weight: 700;
+                        font-size: 12px;
+                        margin-bottom: 4px;
+                        color: white;
+                    }}
+                    .pair-value {{
+                        font-weight: 600;
+                        font-size: 13px;
+                        color: white;
+                    }}
+                    .empty-cell {{
+                        background-color: #f0f0f0;
+                        border: 1px solid #d0d0d0;
+                    }}
+                </style>
+            </head>
+            <body>
+                {matrix_html}
+            </body>
+            </html>
+            """,
+            height=700,
+            scrolling=True
+        )
+        
+        st.success("✅ Matrice mise à jour avec succès !")
 
 else:
-    st.info("👆 Cliquez sur le bouton pour générer la matrice des forces des devises")
-    
-    # Exemple visuel
-    st.markdown("### Exemple de matrice")
-    st.image("https://via.placeholder.com/800x400/0e1117/8b949e?text=Matrice+des+devises", 
-             caption="La matrice affichera toutes les paires croisées avec vos couleurs")
+    st.info("👆 Cliquez pour charger la matrice du marché Forex")
+             
