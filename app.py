@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from scipy.stats import zscore
+import requests
+from datetime import datetime, timedelta
 
 # ------------------------------------------------------------
 # 1. STYLE CSS (DESIGN TUILES)
@@ -76,6 +78,26 @@ st.markdown("""
         padding-bottom: 5px;
         width: 100%;
     }
+    
+    /* Badge de source de données */
+    .data-source-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+    
+    .source-oanda {
+        background-color: #15803d;
+        color: white;
+    }
+    
+    .source-yahoo {
+        background-color: #4b5563;
+        color: white;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -98,8 +120,85 @@ CONFIG = {
     'period': '60d', 'interval': '1d', 'lookback_days': 3, 'atr_period': 14
 }
 
+# Mapping Yahoo -> OANDA pour les paires Forex
+YAHOO_TO_OANDA = {
+    'EURUSD=X': 'EUR_USD', 'GBPUSD=X': 'GBP_USD', 'USDJPY=X': 'USD_JPY',
+    'USDCHF=X': 'USD_CHF', 'AUDUSD=X': 'AUD_USD', 'USDCAD=X': 'USD_CAD',
+    'NZDUSD=X': 'NZD_USD', 'EURGBP=X': 'EUR_GBP', 'EURJPY=X': 'EUR_JPY',
+    'EURCHF=X': 'EUR_CHF', 'EURAUD=X': 'EUR_AUD', 'EURCAD=X': 'EUR_CAD',
+    'EURNZD=X': 'EUR_NZD', 'GBPJPY=X': 'GBP_JPY', 'GBPCHF=X': 'GBP_CHF',
+    'GBPAUD=X': 'GBP_AUD', 'GBPCAD=X': 'GBP_CAD', 'GBPNZD=X': 'GBP_NZD',
+    'AUDJPY=X': 'AUD_JPY', 'AUDCAD=X': 'AUD_CAD', 'AUDNZD=X': 'AUD_NZD',
+    'AUDCHF=X': 'AUD_CHF', 'CADJPY=X': 'CAD_JPY', 'CADCHF=X': 'CAD_CHF',
+    'NZDJPY=X': 'NZD_JPY', 'NZDCHF=X': 'NZD_CHF', 'CHFJPY=X': 'CHF_JPY'
+}
+
 # ------------------------------------------------------------
-# 3. MOTEUR DE CALCUL (DATA)
+# 3. CONNEXION OANDA
+# ------------------------------------------------------------
+def get_oanda_credentials():
+    """Récupère les credentials OANDA depuis les secrets"""
+    try:
+        account_id = st.secrets["OANDA_ACCOUNT_ID"]
+        access_token = st.secrets["OANDA_ACCESS_TOKEN"]
+        return account_id, access_token
+    except:
+        return None, None
+
+def fetch_oanda_candles(instrument, count=60):
+    """Récupère les données OANDA pour un instrument"""
+    account_id, access_token = get_oanda_credentials()
+    
+    if not account_id or not access_token:
+        return None
+    
+    # URL de l'API OANDA (practice ou live)
+    base_url = "https://api-fxpractice.oanda.com"  # Changez en https://api-fxtrade.oanda.com pour le compte réel
+    
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    
+    params = {
+        "count": count,
+        "granularity": "D"  # Daily candles
+    }
+    
+    try:
+        url = f"{base_url}/v3/instruments/{instrument}/candles"
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            candles = data.get('candles', [])
+            
+            if not candles:
+                return None
+            
+            # Conversion en DataFrame
+            df = pd.DataFrame([{
+                'time': c['time'],
+                'open': float(c['mid']['o']),
+                'high': float(c['mid']['h']),
+                'low': float(c['mid']['l']),
+                'close': float(c['mid']['c']),
+                'volume': int(c['volume'])
+            } for c in candles if c['complete']])
+            
+            df['time'] = pd.to_datetime(df['time'])
+            df = df.set_index('time')
+            df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+            
+            return df
+        else:
+            return None
+    except Exception as e:
+        st.warning(f"Erreur OANDA pour {instrument}: {str(e)}")
+        return None
+
+# ------------------------------------------------------------
+# 4. MOTEUR DE CALCUL (DATA)
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -108,23 +207,46 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
-def get_market_data(config):
+def get_market_data(config, use_oanda=True):
     tickers = config['tickers']
-    # Téléchargement optimisé
-    data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
-    
     results = {}
+    data_sources = {}
+    
+    # Vérifier si OANDA est disponible
+    oanda_available = use_oanda and get_oanda_credentials()[0] is not None
+    
+    if oanda_available:
+        st.info("🟢 Connexion OANDA active - Données en temps réel")
+    else:
+        st.info("📊 Utilisation de Yahoo Finance")
+    
+    # Téléchargement Yahoo Finance pour tous les actifs
+    data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
     
     for ticker in tickers:
         try:
-            df = data[ticker].dropna()
-            if len(df) < 20: continue
+            # Essayer OANDA d'abord pour les paires Forex
+            df = None
+            source = "Yahoo"
+            
+            if oanda_available and ticker in YAHOO_TO_OANDA:
+                oanda_instrument = YAHOO_TO_OANDA[ticker]
+                df = fetch_oanda_candles(oanda_instrument, count=60)
+                if df is not None and len(df) >= 20:
+                    source = "OANDA"
+            
+            # Fallback sur Yahoo Finance si OANDA échoue
+            if df is None:
+                df = data[ticker].dropna()
+                if len(df) < 20:
+                    continue
             
             close = df['Close']
             price_now = close.iloc[-1]
             price_past = close.shift(config['lookback_days']).iloc[-1]
             
-            if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
+            if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
+                continue
 
             # Calculs
             raw_move_pct = (price_now - price_past) / price_past
@@ -133,14 +255,22 @@ def get_market_data(config):
             strength = raw_move_pct / max(atr_pct, 0.0001)
             
             # Catégories
-            if "=X" in ticker: cat = "FOREX"
-            elif "=F" in ticker: cat = "COMMODITIES"
-            elif "^" in ticker: cat = "INDICES"
-            else: cat = "OTHER"
+            if "=X" in ticker:
+                cat = "FOREX"
+            elif "=F" in ticker:
+                cat = "COMMODITIES"
+            elif "^" in ticker:
+                cat = "INDICES"
+            else:
+                cat = "OTHER"
             
             # Nettoyage des noms
             display_name = ticker.replace('=X','').replace('=F','').replace('^','')
-            mapping = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'}
+            mapping = {
+                'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 
+                'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 
+                'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'
+            }
             display_name = mapping.get(display_name, display_name)
 
             results[ticker] = {
@@ -148,10 +278,16 @@ def get_market_data(config):
                 'raw_score': strength,
                 'category': cat
             }
+            data_sources[ticker] = source
+            
         except KeyError:
             continue
+        except Exception as e:
+            st.warning(f"Erreur pour {ticker}: {str(e)}")
+            continue
 
-    if not results: return pd.DataFrame()
+    if not results:
+        return pd.DataFrame(), {}
 
     df_res = pd.DataFrame.from_dict(results, orient='index')
     
@@ -162,10 +298,10 @@ def get_market_data(config):
     df_res['score'] = 5 + (z / 5) * 10
     df_res['score'] = df_res['score'].clip(0, 10)
     
-    return df_res.sort_values(by='score', ascending=False)
+    return df_res.sort_values(by='score', ascending=False), data_sources
 
 # ------------------------------------------------------------
-# 4. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
+# 5. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
 # ------------------------------------------------------------
 def get_color(score):
     # Palette Finviz: Vert Foncé (Achat Fort) -> Rouge Foncé (Vente Forte)
@@ -226,17 +362,53 @@ def generate_full_html_report(df):
     return tiles_html
 
 # ------------------------------------------------------------
-# 5. APPLICATION STREAMLIT
+# 6. APPLICATION STREAMLIT
 # ------------------------------------------------------------
 st.title("🗺️ Market Heatmap Pro")
 st.write("Analyse de force relative. Vert = Acheteur | Rouge = Vendeur.")
 
+# Options dans la sidebar
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    use_oanda = st.checkbox("Utiliser OANDA API", value=True, 
+                            help="Utilise l'API OANDA pour des données Forex en temps réel")
+    
+    lookback = st.slider("Période d'analyse (jours)", 1, 10, CONFIG['lookback_days'])
+    CONFIG['lookback_days'] = lookback
+    
+    atr_period = st.slider("Période ATR", 5, 30, CONFIG['atr_period'])
+    CONFIG['atr_period'] = atr_period
+    
+    st.markdown("---")
+    
+    # Vérification de la connexion OANDA
+    account_id, access_token = get_oanda_credentials()
+    if account_id and access_token:
+        st.success("✅ OANDA connecté")
+        st.caption(f"Compte: {account_id[:8]}...")
+    else:
+        st.warning("⚠️ OANDA non configuré")
+        st.caption("Ajoutez vos credentials dans les Secrets")
+
 if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
     with st.spinner("Téléchargement et calculs en cours..."):
         # 1. Calculs
-        df_results = get_market_data(CONFIG)
+        df_results, sources = get_market_data(CONFIG, use_oanda=use_oanda)
         
         if not df_results.empty:
+            # Afficher les statistiques de sources
+            oanda_count = sum(1 for s in sources.values() if s == "OANDA")
+            yahoo_count = len(sources) - oanda_count
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 Total actifs", len(sources))
+            with col2:
+                st.metric("🟢 OANDA", oanda_count)
+            with col3:
+                st.metric("📈 Yahoo Finance", yahoo_count)
+            
             # 2. Génération et affichage du HTML
             html_content = generate_full_html_report(df_results)
             
