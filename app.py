@@ -28,68 +28,13 @@ st.markdown("""
         font-size: 14px;
         margin-bottom: 20px;
     }
-    
-    .matrix-grid {
-        display: grid;
-        grid-template-columns: 80px repeat(8, 150px);
-        gap: 0;
-        margin: 20px 0;
-        width: fit-content;
-    }
-    
-    .currency-header {
-        background-color: #e8e8e8;
-        border: 1px solid #d0d0d0;
-        padding: 15px;
-        text-align: center;
-        font-weight: 700;
-        font-size: 14px;
-        color: #333;
-    }
-    
-    .pair-cell {
-        border: 1px solid rgba(0,0,0,0.1);
-        padding: 10px;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.2s;
-        min-height: 60px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    }
-    
-    .pair-cell:hover {
-        transform: scale(1.05);
-        z-index: 10;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
-    
-    .pair-name {
-        font-weight: 700;
-        font-size: 11px;
-        margin-bottom: 4px;
-        color: white;
-    }
-    
-    .pair-value {
-        font-weight: 600;
-        font-size: 13px;
-        color: white;
-    }
-    
-    .empty-cell {
-        background-color: #f0f0f0;
-        border: 1px solid #d0d0d0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
 # 2. CONFIGURATION OANDA
 # ------------------------------------------------------------
-CURRENCIES = ['EUR', 'USD', 'CAD', 'CHF', 'NZD', 'AUD', 'JPY', 'GBP']
+CURRENCIES = ['EUR', 'CAD', 'USD', 'CHF', 'NZD', 'GBP', 'JPY', 'AUD']
 
 def get_oanda_credentials():
     """Récupère les credentials OANDA depuis les secrets"""
@@ -108,7 +53,6 @@ def fetch_oanda_candles(instrument, count=60):
     if not account_id or not access_token:
         return None
     
-    # URL de l'API OANDA (practice)
     base_url = "https://api-fxpractice.oanda.com"
     
     headers = {
@@ -118,7 +62,7 @@ def fetch_oanda_candles(instrument, count=60):
     
     params = {
         "count": count,
-        "granularity": "D"  # Daily candles
+        "granularity": "D"
     }
     
     try:
@@ -132,7 +76,6 @@ def fetch_oanda_candles(instrument, count=60):
             if not candles:
                 return None
             
-            # Conversion en DataFrame
             df = pd.DataFrame([{
                 'time': c['time'],
                 'close': float(c['mid']['c'])
@@ -169,25 +112,23 @@ def calculate_pair_change(base, quote, lookback_days=1):
         return None
 
 def get_all_pairs_data(currencies, lookback_days=1):
-    """Récupère toutes les variations des paires"""
+    """Récupère toutes les variations en forme pyramidale"""
     results = {}
-    total = len(currencies) * len(currencies)
+    total_pairs = sum(range(1, len(currencies)))
     current = 0
     
     progress_bar = st.progress(0)
     status = st.empty()
     
+    # Parcours pyramidal : chaque devise contre les suivantes
     for i, base in enumerate(currencies):
-        for j, quote in enumerate(currencies):
-            if base == quote:
-                results[(i, j)] = None
-            else:
-                status.text(f"📊 Analyse {base}/{quote}...")
-                pct = calculate_pair_change(base, quote, lookback_days)
-                results[(i, j)] = pct
+        for quote in currencies[i+1:]:
+            status.text(f"📊 Analyse {base}/{quote}...")
+            pct = calculate_pair_change(base, quote, lookback_days)
+            results[f"{base}/{quote}"] = pct
             
             current += 1
-            progress_bar.progress(current / total)
+            progress_bar.progress(current / total_pairs)
     
     progress_bar.empty()
     status.empty()
@@ -200,59 +141,132 @@ def get_color_from_pct(pct):
         return "#e8e8e8"
     
     # Vert (positif)
-    if pct >= 0.50: return "#006400"    # Vert très foncé
-    if pct >= 0.30: return "#228B22"    # Vert foncé
-    if pct >= 0.15: return "#32CD32"    # Vert
-    if pct >= 0.08: return "#90EE90"    # Vert clair
-    if pct >= 0.01: return "#98FB98"    # Vert très clair
+    if pct >= 0.50: return "#006400"
+    if pct >= 0.30: return "#228B22"
+    if pct >= 0.15: return "#32CD32"
+    if pct >= 0.08: return "#90EE90"
+    if pct >= 0.01: return "#98FB98"
     
     # Rouge (négatif)
-    if pct <= -0.50: return "#8B0000"   # Rouge très foncé
-    if pct <= -0.30: return "#B22222"   # Rouge foncé
-    if pct <= -0.15: return "#DC143C"   # Rouge
-    if pct <= -0.08: return "#FF6347"   # Rouge clair
-    if pct <= -0.01: return "#FFA07A"   # Rouge très clair
+    if pct <= -0.50: return "#8B0000"
+    if pct <= -0.30: return "#B22222"
+    if pct <= -0.15: return "#DC143C"
+    if pct <= -0.08: return "#FF6347"
+    if pct <= -0.01: return "#FFA07A"
     
-    return "#D3D3D3"  # Gris neutre
+    return "#D3D3D3"
 
 # ------------------------------------------------------------
-# 3. GÉNÉRATEUR HTML DE LA MATRICE
+# 3. GÉNÉRATEUR HTML DE LA PYRAMIDE
 # ------------------------------------------------------------
-def generate_matrix_html(currencies, data):
-    """Génère la matrice exactement comme l'image"""
-    html = '<div class="matrix-grid">'
-    
-    # Première ligne : en-têtes des colonnes
-    html += '<div class="currency-header"></div>'  # Coin vide
-    for currency in currencies:
-        html += f'<div class="currency-header">{currency}</div>'
-    
-    # Lignes de données
-    for i, base in enumerate(currencies):
-        # En-tête de ligne
-        html += f'<div class="currency-header">{base}</div>'
+def generate_pyramid_html(currencies, data):
+    """Génère la matrice pyramidale exactement comme l'image"""
+    html = """
+    <style>
+        .pyramid-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            width: fit-content;
+            margin: 20px 0;
+        }
         
-        # Cellules de paires
-        for j, quote in enumerate(currencies):
-            if i == j:
-                # Cellule diagonale
-                html += f'<div class="pair-cell empty-cell"><span style="color: #333; font-weight: 700;">{base}</span></div>'
+        .pyramid-row {
+            display: flex;
+            gap: 0;
+            justify-content: flex-start;
+        }
+        
+        .currency-label {
+            background-color: #e8e8e8;
+            border: 1px solid #d0d0d0;
+            padding: 15px;
+            text-align: center;
+            font-weight: 700;
+            font-size: 14px;
+            color: #333;
+            width: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .pair-cell {
+            border: 1px solid rgba(0,0,0,0.1);
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 150px;
+            min-height: 60px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .pair-cell:hover {
+            transform: scale(1.05);
+            z-index: 10;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .pair-name {
+            font-weight: 700;
+            font-size: 11px;
+            margin-bottom: 4px;
+            color: white;
+        }
+        
+        .pair-value {
+            font-weight: 600;
+            font-size: 13px;
+            color: white;
+        }
+        
+        .header-row {
+            display: flex;
+            gap: 0;
+            margin-bottom: 0;
+        }
+    </style>
+    
+    <div class="pyramid-container">
+    """
+    
+    # En-têtes des colonnes (devises quote)
+    html += '<div class="header-row">'
+    html += '<div class="currency-label"></div>'  # Coin vide
+    for i in range(1, len(currencies)):
+        html += f'<div class="currency-label">{currencies[i]}</div>'
+    html += '</div>'
+    
+    # Lignes pyramidales
+    for i, base in enumerate(currencies[:-1]):
+        html += '<div class="pyramid-row">'
+        
+        # Label de la devise de base
+        html += f'<div class="currency-label">{base}</div>'
+        
+        # Cellules de paires (seulement les suivantes)
+        for j in range(i+1, len(currencies)):
+            quote = currencies[j]
+            pair = f"{base}/{quote}"
+            pct = data.get(pair)
+            
+            if pct is None:
+                html += '<div class="pair-cell" style="background-color: #e8e8e8;"><span style="color: #999; font-size: 12px;">unch</span></div>'
             else:
-                pct = data.get((i, j))
-                
-                if pct is None:
-                    html += '<div class="pair-cell empty-cell"><span style="color: #999; font-size: 12px;">unch</span></div>'
-                else:
-                    color = get_color_from_pct(pct)
-                    pair_name = f"{base}/{quote}"
-                    
-                    html += f'''
-                    <div class="pair-cell" style="background-color: {color};">
-                        <div class="pair-name">{pair_name}</div>
-                        <div class="pair-value">{pct:+.2f}%</div>
-                    </div>
-                    '''
+                color = get_color_from_pct(pct)
+                html += f'''
+                <div class="pair-cell" style="background-color: {color};">
+                    <div class="pair-name">{pair}</div>
+                    <div class="pair-value">{pct:+.2f}%</div>
+                </div>
+                '''
         
+        html += '</div>'
+    
     html += '</div>'
     return html
 
@@ -264,7 +278,7 @@ st.markdown('<div class="main-title">Forex Market Map</div>', unsafe_allow_html=
 today = datetime.now().strftime("%a, %b %dth, %Y")
 st.markdown(f'<div class="date-info">{today}</div>', unsafe_allow_html=True)
 
-# Sidebar avec paramètres
+# Sidebar
 with st.sidebar:
     st.header("⚙️ Paramètres")
     
@@ -282,7 +296,6 @@ with st.sidebar:
 
 # Bouton principal
 if st.button("🔄 Actualiser les données", type="primary"):
-    # Vérifier la connexion OANDA
     if get_oanda_credentials()[0] is None:
         st.error("❌ Impossible de continuer sans credentials OANDA. Configurez-les dans les Secrets.")
     else:
@@ -290,8 +303,8 @@ if st.button("🔄 Actualiser les données", type="primary"):
             # Récupération des données
             data = get_all_pairs_data(CURRENCIES, lookback_days=lookback)
             
-            # Génération de la matrice
-            matrix_html = generate_matrix_html(CURRENCIES, data)
+            # Génération de la pyramide
+            pyramid_html = generate_pyramid_html(CURRENCIES, data)
             
             # Affichage
             st.components.v1.html(
@@ -299,96 +312,33 @@ if st.button("🔄 Actualiser les données", type="primary"):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <style>
-                        body {{
-                            margin: 0;
-                            padding: 20px;
-                            background-color: #f8f9fa;
-                            font-family: Arial, sans-serif;
-                        }}
-                        .matrix-grid {{
-                            display: grid;
-                            grid-template-columns: 80px repeat(8, 150px);
-                            gap: 0;
-                            margin: 0;
-                            width: fit-content;
-                        }}
-                        .currency-header {{
-                            background-color: #e8e8e8;
-                            border: 1px solid #d0d0d0;
-                            padding: 15px;
-                            text-align: center;
-                            font-weight: 700;
-                            font-size: 14px;
-                            color: #333;
-                        }}
-                        .pair-cell {{
-                            border: 1px solid rgba(0,0,0,0.1);
-                            padding: 10px;
-                            text-align: center;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                            min-height: 60px;
-                            display: flex;
-                            flex-direction: column;
-                            justify-content: center;
-                            align-items: center;
-                        }}
-                        .pair-cell:hover {{
-                            transform: scale(1.05);
-                            z-index: 10;
-                            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                        }}
-                        .pair-name {{
-                            font-weight: 700;
-                            font-size: 11px;
-                            margin-bottom: 4px;
-                            color: white;
-                        }}
-                        .pair-value {{
-                            font-weight: 600;
-                            font-size: 13px;
-                            color: white;
-                        }}
-                        .empty-cell {{
-                            background-color: #f0f0f0;
-                            border: 1px solid #d0d0d0;
-                        }}
-                    </style>
+                    <meta charset="utf-8">
                 </head>
-                <body>
-                    {matrix_html}
+                <body style="margin: 0; padding: 20px; background-color: #f8f9fa; font-family: Arial, sans-serif;">
+                    {pyramid_html}
                 </body>
                 </html>
                 """,
-                height=700,
+                height=650,
                 scrolling=True
             )
             
             st.success("✅ Matrice mise à jour avec succès !")
             
-            # Légende
-            st.markdown("---")
-            st.markdown("""
-            **Comment lire la matrice :**
-            - 🟢 **Vert** : La devise de base (ligne) monte contre la devise de cotation (colonne)
-            - 🔴 **Rouge** : La devise de base (ligne) baisse contre la devise de cotation (colonne)
-            - Le pourcentage indique la variation sur la période choisie
-            """)
+            # Statistiques
+            valid_pairs = sum(1 for v in data.values() if v is not None)
+            st.info(f"📊 {valid_pairs} paires chargées depuis OANDA")
 
 else:
-    st.info("👆 Cliquez pour charger la matrice des paires Forex (données OANDA)")
+    st.info("👆 Cliquez pour charger la matrice pyramidale des paires Forex")
     
-    # Exemple visuel de la matrice
     st.markdown("""
-    ### 📊 À propos de cette matrice
+    ### 📊 Matrice Pyramidale
     
-    Cette application affiche une **matrice de corrélation des devises** en temps réel via l'API OANDA.
+    Cette application affiche une **matrice triangulaire** des paires de devises :
+    - **Forme pyramidale** : Évite les doublons (EUR/USD = inverse de USD/EUR)
+    - **Données OANDA** : Prix en temps réel
+    - **Couleurs** : Vert = hausse, Rouge = baisse
     
-    Chaque cellule montre la performance d'une paire de devises :
-    - **Ligne** : Devise de base
-    - **Colonne** : Devise de cotation
-    - **Couleur** : Force du mouvement (vert = hausse, rouge = baisse)
-    
-    **Exemple** : La cellule EUR/USD montre comment l'EUR performe contre l'USD.
+    Chaque cellule montre la performance de la devise de gauche contre celle du haut.
     """)
