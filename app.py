@@ -5,102 +5,102 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# 1. CONFIGURATION VISUELLE (CSS FLUIDE)
+# 1. STYLE CSS (DESIGN TUILES)
 # ------------------------------------------------------------
-st.set_page_config(page_title="Market Heatmap", layout="wide")
+st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
 
 st.markdown("""
 <style>
-    /* Fond sombre propre */
+    /* Fond sombre global */
     .stApp { background-color: #0e1117; }
 
-    /* Conteneur Grille (Flexbox) */
+    /* CONTENEUR PRINCIPAL FLEXBOX (Pour aligner les tuiles) */
     .heatmap-container {
         display: flex;
-        flex-wrap: wrap;       /* Passage à la ligne auto */
+        flex-wrap: wrap;       /* Important: permet de passer à la ligne */
         gap: 8px;              /* Espace entre les tuiles */
         justify-content: flex-start;
-        padding-bottom: 25px;
+        padding-bottom: 30px;
     }
 
-    /* CARTE (Tuile) */
+    /* LA TUILE (Carte rectangulaire) */
     .market-tile {
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        width: 115px;          /* Largeur fixe */
-        height: 65px;          /* Hauteur fixe */
+        width: 120px;          /* Largeur fixe */
+        height: 70px;          /* Hauteur fixe */
         border-radius: 6px;
         color: white;
-        box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         border: 1px solid rgba(255,255,255,0.08);
-        transition: transform 0.15s ease-in-out;
+        transition: transform 0.2s;
+        margin-bottom: 5px;    /* Sécurité d'espacement */
     }
     
     .market-tile:hover {
-        transform: scale(1.08);
-        border-color: rgba(255,255,255,0.6);
-        z-index: 10;
+        transform: translateY(-3px);
+        border-color: rgba(255,255,255,0.5);
         cursor: pointer;
     }
 
-    /* Texte Symbole */
+    /* Texte SYMBOLE (ex: EURUSD) */
     .tile-symbol {
-        font-family: 'Roboto', sans-serif;
+        font-family: 'Arial', sans-serif;
         font-weight: 800;
         font-size: 14px;
-        margin-bottom: 3px;
-        text-shadow: 0 2px 2px rgba(0,0,0,0.6);
+        margin-bottom: 4px;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
     }
     
-    /* Texte Score */
+    /* Texte SCORE (ex: 7.8) */
     .tile-score {
         font-family: 'Courier New', monospace;
         font-weight: bold;
         font-size: 15px;
-        background-color: rgba(0,0,0,0.25);
-        padding: 1px 8px;
+        background-color: rgba(0,0,0,0.3);
+        padding: 2px 8px;
         border-radius: 4px;
     }
 
-    /* Titres des sections */
+    /* TITRES DES SECTIONS */
     .section-header {
+        font-family: 'Helvetica', sans-serif;
         font-size: 18px;
         font-weight: 600;
         color: #8b949e;
-        margin-top: 10px;
-        margin-bottom: 15px;
+        margin-top: 15px;
+        margin-bottom: 10px;
         border-bottom: 1px solid #30363d;
         padding-bottom: 5px;
+        width: 100%;
         display: block;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 2. LISTE DES ACTIFS A SCANNER
+# 2. CONFIGURATION DES ACTIFS
 # ------------------------------------------------------------
 CONFIG = {
     'tickers': [
-        # --- FOREX ---
+        # FOREX
         'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
         'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
         'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
         'AUDJPY=X', 'AUDCAD=X', 'AUDNZD=X', 'AUDCHF=X',
         'CADJPY=X', 'CADCHF=X', 'NZDJPY=X', 'NZDCHF=X', 'CHFJPY=X',
-        
-        # --- INDICES ---
+        # INDICES
         '^DJI', '^GSPC', '^IXIC', '^FCHI', '^GDAXI',
-        
-        # --- METAL / OIL ---
+        # MATIÈRES PREMIÈRES
         'GC=F', 'CL=F', 'SI=F', 'HG=F'
     ],
     'period': '60d', 'interval': '1d', 'lookback_days': 3, 'atr_period': 14
 }
 
 # ------------------------------------------------------------
-# 3. MOTEUR DE CALCUL
+# 3. MOTEUR DE CALCUL (DATA)
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -111,6 +111,7 @@ def calculate_atr(df, period=14):
 
 def get_market_data(config):
     tickers = config['tickers']
+    # Téléchargement optimisé
     data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
     
     results = {}
@@ -126,7 +127,7 @@ def get_market_data(config):
             
             if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
 
-            # Force Relative
+            # Calculs
             raw_move_pct = (price_now - price_past) / price_past
             atr = calculate_atr(df, config['atr_period']).iloc[-1]
             atr_pct = (atr / price_now) if price_now != 0 else 0.001
@@ -138,7 +139,7 @@ def get_market_data(config):
             elif "^" in ticker: cat = "INDICES"
             else: cat = "OTHER"
             
-            # Noms propres
+            # Nettoyage des noms
             display_name = ticker.replace('=X','').replace('=F','').replace('^','')
             mapping = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'}
             display_name = mapping.get(display_name, display_name)
@@ -155,7 +156,7 @@ def get_market_data(config):
 
     df_res = pd.DataFrame.from_dict(results, orient='index')
     
-    # Normalisation 0-10
+    # Normalisation sur 0-10
     vals = df_res['raw_score'].values
     z = zscore(vals)
     z = np.clip(np.nan_to_num(z), -2.5, 2.5)
@@ -165,83 +166,88 @@ def get_market_data(config):
     return df_res.sort_values(by='score', ascending=False)
 
 # ------------------------------------------------------------
-# 4. GÉNÉRATEUR HTML (SANS BUGS)
+# 4. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
 # ------------------------------------------------------------
 def get_color(score):
-    # Palette Finviz: Vert Foncé (Bull) -> Rouge Foncé (Bear)
-    if score >= 8.5: return "#064e3b" # Strong Buy
-    if score >= 7.0: return "#15803d" # Buy
-    if score >= 6.0: return "#22c55e" # Weak Buy
-    if score >= 5.5: return "#4b5563" # Neutral +
+    # Palette Finviz: Vert Foncé (Achat Fort) -> Rouge Foncé (Vente Forte)
+    if score >= 8.5: return "#064e3b" # Vert Foncé
+    if score >= 7.0: return "#15803d" # Vert
+    if score >= 6.0: return "#22c55e" # Vert Clair
+    if score >= 5.5: return "#4b5563" # Gris-Vert
     
-    if score <= 1.5: return "#7f1d1d" # Strong Sell
-    if score <= 3.0: return "#b91c1c" # Sell
-    if score <= 4.0: return "#ef4444" # Weak Sell
-    if score <= 4.5: return "#4b5563" # Neutral -
+    if score <= 1.5: return "#7f1d1d" # Rouge Foncé
+    if score <= 3.0: return "#b91c1c" # Rouge
+    if score <= 4.0: return "#ef4444" # Rouge Clair
+    if score <= 4.5: return "#4b5563" # Gris-Rouge
     
-    return "#374151" # Neutral Grey
+    return "#374151" # Gris Neutre
 
-def render_section_html(title, df_subset):
-    if df_subset.empty: return ""
+def generate_full_html_report(df):
+    """
+    Cette fonction construit TOUT le code HTML en une seule chaine de caractères.
+    C'est ce qui empêche les bugs d'affichage.
+    """
+    if df.empty: return "<div style='color:red'>Aucune donnée.</div>"
     
-    # 1. Le Titre de la section
-    html_output = f'<div class="section-header">{title}</div>'
+    full_html = ""
     
-    # 2. Ouverture du conteneur Flexbox
-    html_output += '<div class="heatmap-container">'
+    # Définition des sections
+    sections = [
+        ("💱 FOREX (Paires Majeures & Croisées)", 'FOREX'),
+        ("📊 INDICES MONDIAUX", 'INDICES'),
+        ("🪙 MATIÈRES PREMIÈRES", 'COMMODITIES')
+    ]
     
-    # 3. Boucle pour créer les tuiles
-    for _, row in df_subset.iterrows():
-        score = row['score']
-        name = row['name']
-        bg_color = get_color(score)
+    for title, cat_key in sections:
+        subset = df[df['category'] == cat_key]
+        if subset.empty: continue
         
-        # Le bloc HTML d'une seule tuile
-        tile_html = f"""
-        <div class="market-tile" style="background-color: {bg_color};">
-            <div class="tile-symbol">{name}</div>
-            <div class="tile-score">{score:.1f}</div>
-        </div>
-        """
-        html_output += tile_html
+        # 1. Ajouter le Titre de section
+        full_html += f"<div class='section-header'>{title}</div>"
         
-    # 4. Fermeture du conteneur
-    html_output += '</div>'
-    
-    return html_output
+        # 2. Ouvrir le conteneur flexible
+        full_html += "<div class='heatmap-container'>"
+        
+        # 3. Boucle sur les tuiles
+        for _, row in subset.iterrows():
+            score = row['score']
+            name = row['name']
+            bg_color = get_color(score)
+            
+            # HTML de la tuile
+            full_html += f"""
+            <div class="market-tile" style="background-color: {bg_color};">
+                <div class="tile-symbol">{name}</div>
+                <div class="tile-score">{score:.1f}</div>
+            </div>
+            """
+            
+        # 4. Fermer le conteneur
+        full_html += "</div>"
+        
+    return full_html
 
 # ------------------------------------------------------------
 # 5. APPLICATION STREAMLIT
 # ------------------------------------------------------------
 st.title("🗺️ Market Heatmap Pro")
-st.write("Visualisation de force relative (Momentum vs Volatilité). Vert = Fort, Rouge = Faible.")
+st.write("Analyse de force relative. Vert = Acheteur | Rouge = Vendeur.")
 
-if st.button("🚀 ACTUALISER LE MARCHÉ", type="primary"):
-    with st.spinner("Analyse en cours..."):
-        df_final = get_market_data(CONFIG)
+if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
+    with st.spinner("Téléchargement et calculs en cours..."):
+        # 1. Calculs
+        df_results = get_market_data(CONFIG)
         
-        if not df_final.empty:
+        if not df_results.empty:
+            # 2. Génération du HTML (invisible pour l'instant)
+            html_content = generate_full_html_report(df_results)
             
-            # --- Génération du HTML complet ---
-            full_html = ""
-            
-            # Section Forex
-            fx = df_final[df_final['category'] == 'FOREX']
-            full_html += render_section_html("💱 FOREX (Paires)", fx)
-            
-            # Section Indices
-            indices = df_final[df_final['category'] == 'INDICES']
-            full_html += render_section_html("📊 INDICES MONDIAUX", indices)
-            
-            # Section Commodities
-            commodities = df_final[df_final['category'] == 'COMMODITIES']
-            full_html += render_section_html("🪙 MATIÈRES PREMIÈRES", commodities)
-            
-            # --- RENDU FINAL (Le point critique) ---
-            # C'est cette ligne qui empêche le code de s'afficher en texte brut
-            st.markdown(full_html, unsafe_allow_html=True)
+            # 3. Affichage (Le moment critique)
+            # unsafe_allow_html=True est OBLIGATOIRE ici
+            st.markdown(html_content, unsafe_allow_html=True)
             
         else:
-            st.error("Aucune donnée disponible. Vérifiez votre connexion internet.")
+            st.error("Erreur de récupération des données. Vérifiez votre connexion.")
+
 else:
-    st.info("Cliquez sur le bouton pour lancer le scan.")
+    st.info("Cliquez sur le bouton pour lancer l'analyse.")
