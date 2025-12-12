@@ -5,122 +5,99 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# 1. CONFIGURATION & STYLES (COMPACT & GRID)
+# 1. CONFIGURATION & STYLE (CSS MARKET MAP)
 # ------------------------------------------------------------
-st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
+st.set_page_config(page_title="Forex Heatmap Pro", layout="wide")
 
 st.markdown("""
 <style>
-    /* Fond global */
-    .stApp { background-color: #0b0e11; }
+    /* Fond sombre */
+    .stApp { background-color: #121212; }
 
-    /* Style de la "Carte" pour chaque actif */
-    .metric-card {
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        transition: transform 0.2s;
-    }
-    .metric-card:hover {
-        border-color: #58a6ff;
-        transform: translateY(-2px);
-    }
-
-    /* En-tête de la carte (Symbole et Score) */
-    .card-header {
+    /* Conteneur Flex pour les tuiles (Alignement automatique) */
+    .heatmap-container {
         display: flex;
-        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px; /* Espace entre les tuiles */
+        justify-content: flex-start;
+        padding: 10px 0;
+    }
+
+    /* La TUILE (Le rectangle coloré) */
+    .market-tile {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
         align-items: center;
-        margin-bottom: 6px;
-    }
-    .symbol-text {
-        font-family: 'Roboto', sans-serif;
-        font-weight: 700;
-        font-size: 14px;
-        color: #e6edf3;
-    }
-    .score-text {
-        font-family: 'Courier New', monospace;
-        font-weight: bold;
-        font-size: 14px;
-    }
-
-    /* Conteneur de la jauge compacte */
-    .gauge-container {
-        display: flex;
-        flex-direction: row;
-        gap: 2px; /* Espace très fin */
-        height: 8px; /* Hauteur réduite pour compacité */
-        width: 100%;
-        margin-top: 4px;
-        position: relative;
-    }
-
-    .segment {
-        flex: 1;
-        height: 100%;
-        border-radius: 2px;
-    }
-
-    /* Le curseur triangle (adapté à la petite taille) */
-    .cursor-marker {
-        position: absolute;
-        top: 10px; /* Juste sous la barre */
-        width: 0; 
-        height: 0; 
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-bottom: 5px solid #fff;
-        transform: translateX(-50%);
-        transition: left 0.4s ease-out;
+        width: 130px;  /* Largeur fixe pour alignement propre */
+        height: 70px;  /* Hauteur compacte */
+        border-radius: 4px;
+        color: white;
+        font-family: 'Arial', sans-serif;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        transition: transform 0.2s;
+        border: 1px solid rgba(255,255,255,0.1);
     }
     
-    /* Sections */
-    .section-title {
+    .market-tile:hover {
+        transform: scale(1.05);
+        z-index: 10;
+        border-color: white;
+        cursor: pointer;
+    }
+
+    /* Texte dans la tuile */
+    .tile-symbol {
+        font-weight: 800;
+        font-size: 15px;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    
+    .tile-score {
+        font-size: 13px;
+        font-weight: 400;
+        opacity: 0.9;
+    }
+    
+    /* Titres de section */
+    .section-header {
         color: #8b949e;
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin: 20px 0 10px 0;
-        border-bottom: 1px solid #30363d;
+        font-size: 16px;
+        margin-top: 25px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #333;
         padding-bottom: 5px;
+        font-family: sans-serif;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Liste complète (Forex Majeurs + Cross + Indices + Métaux)
+# LISTE COMPLETE DES PAIRES (Cross inclus)
 CONFIG = {
-    'tickers': {
-        # --- MAJEURS & MINEURS (FOREX) ---
-        'EURUSD=X': 'FX', 'GBPUSD=X': 'FX', 'USDJPY=X': 'FX', 'USDCHF=X': 'FX',
-        'AUDUSD=X': 'FX', 'USDCAD=X': 'FX', 'NZDUSD=X': 'FX',
-        'EURGBP=X': 'FX', 'EURJPY=X': 'FX', 'EURCHF=X': 'FX', 'EURAUD=X': 'FX',
-        'GBPJPY=X': 'FX', 'GBPCHF=X': 'FX', 'AUDJPY=X': 'FX', 'CADJPY=X': 'FX',
-        'CHFJPY=X': 'FX', 'AUDCAD=X': 'FX', 'AUDNZD=X': 'FX', 'NZDJPY=X': 'FX',
-        
-        # --- INDICES ---
-        '^DJI': 'INDICES',      # Dow Jones
-        '^GSPC': 'INDICES',     # S&P 500
-        '^IXIC': 'INDICES',     # Nasdaq
-        '^FCHI': 'INDICES',     # CAC 40
-        '^GDAXI': 'INDICES',    # DAX
-        
-        # --- MATIERES PREMIERES ---
-        'GC=F': 'COMMODITIES',  # Gold
-        'SI=F': 'COMMODITIES',  # Silver
-        'CL=F': 'COMMODITIES',  # Crude Oil
-        'HG=F': 'COMMODITIES'   # Copper
-    },
-    'period': '60d', 'interval': '1d', 
-    'lookback_days': 3,  # Momentum sur 3 jours
+    'tickers': [
+        # MAJEURS
+        'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
+        # CROSS EUR
+        'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
+        # CROSS GBP
+        'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
+        # CROSS AUD/NZD/CAD
+        'AUDJPY=X', 'AUDCAD=X', 'AUDNZD=X', 'AUDCHF=X',
+        'CADJPY=X', 'CADCHF=X', 'NZDJPY=X', 'NZDCHF=X', 'CHFJPY=X',
+        # INDICES
+        '^DJI', '^GSPC', '^IXIC', '^FCHI', '^GDAXI',
+        # COMMODITIES
+        'GC=F', 'CL=F'
+    ],
+    'period': '60d', 
+    'interval': '1d', 
+    'lookback_days': 3,
     'atr_period': 14
 }
 
 # ------------------------------------------------------------
-# 2. CALCULS (Score par PAIRE)
+# 2. MOTEUR DE CALCUL (Score 0-10)
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -129,18 +106,15 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
-def compute_pair_strength(config=CONFIG):
-    tickers_map = config['tickers']
-    tickers_list = list(tickers_map.keys())
-    
-    # Téléchargement groupé
-    data = yf.download(tickers_list, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
+def get_market_data(config):
+    tickers = config['tickers']
+    # Téléchargement groupé pour la vitesse
+    data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
     
     results = {}
     
-    for ticker in tickers_list:
+    for ticker in tickers:
         try:
-            # Gestion des colonnes MultiIndex
             df = data[ticker].dropna()
             if len(df) < 20: continue
             
@@ -150,146 +124,114 @@ def compute_pair_strength(config=CONFIG):
             
             if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
 
-            # 1. Calcul du mouvement brut (%)
+            # Mouvement brut %
             raw_move_pct = (price_now - price_past) / price_past
             
-            # 2. Normalisation par la volatilité (ATR)
-            # Pour comparer le mouvement de l'Or vs l'EURUSD équitablement
+            # Ajustement Volatilité
             atr = calculate_atr(df, config['atr_period']).iloc[-1]
             atr_pct = (atr / price_now) if price_now != 0 else 0.001
-            atr_pct = max(atr_pct, 0.0001) # Sécurité division par zéro
             
-            normalized_strength = raw_move_pct / atr_pct
+            # Force normalisée
+            strength = raw_move_pct / max(atr_pct, 0.0001)
             
+            # Catégorisation simple
+            if "=X" in ticker: cat = "FOREX"
+            elif "=F" in ticker: cat = "COMMODITIES"
+            elif "^" in ticker: cat = "INDICES"
+            else: cat = "OTHER"
+            
+            # Nettoyage nom
+            display_name = ticker.replace('=X','').replace('=F','').replace('^','')
+            # Mapping noms connus
+            name_map = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL'}
+            display_name = name_map.get(display_name, display_name)
+
             results[ticker] = {
-                'raw_score': normalized_strength,
-                'category': tickers_map[ticker]
+                'name': display_name,
+                'raw_score': strength,
+                'category': cat,
+                'pct_change': raw_move_pct * 100
             }
         except KeyError:
             continue
 
-    if not results:
-        return pd.DataFrame()
+    if not results: return pd.DataFrame()
 
     df_res = pd.DataFrame.from_dict(results, orient='index')
     
-    # 3. Z-Score global pour obtenir une note de 0 à 10
-    # 0 = Très Vendeur, 5 = Neutre, 10 = Très Acheteur
+    # Z-Score -> Note de 0 à 10
     vals = df_res['raw_score'].values
     z = zscore(vals)
-    z = np.clip(np.nan_to_num(z), -2.5, 2.5) # On clip à 2.5 écarts types
-    
-    # Transformation Z (-2.5 à 2.5) vers (0 à 10)
-    df_res['score'] = 5 + (z / 5) * 10 
+    z = np.clip(np.nan_to_num(z), -2.5, 2.5)
+    df_res['score'] = 5 + (z / 5) * 10
     df_res['score'] = df_res['score'].clip(0, 10)
-    
-    # Nettoyage du nom du ticker pour l'affichage (retirer =X, =F...)
-    df_res['display_name'] = df_res.index.str.replace('=X','').str.replace('=F','').str.replace('^','')
-    
-    # Remplacer les noms cryptiques par des noms communs
-    names_map = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX40', 'GC':'GOLD', 'SI':'SILVER', 'CL':'OIL', 'HG':'COPPER'}
-    df_res['display_name'] = df_res['display_name'].replace(names_map)
     
     return df_res.sort_values(by='score', ascending=False)
 
 # ------------------------------------------------------------
-# 3. VISUEL HTML (Version "Micro")
+# 3. GÉNÉRATEUR DE TUILES HTML
 # ------------------------------------------------------------
-def get_mini_gauge(score):
-    # Palette Dégradé: Rouge (0) -> Gris (5) -> Vert (10)
-    # Pour le trading de paires : Rouge = Baisse, Vert = Hausse
-    colors = [
-        "#ff2b2b", "#ff5252", "#ff7b7b", "#ffa3a3", # Bearish (Red)
-        "#4a4f55", "#4a4f55",                       # Neutral (Grey)
-        "#85e085", "#5cd65c", "#33cc33", "#00b300"  # Bullish (Green)
-    ]
+def get_color_for_score(score):
+    # Couleurs style "Finviz"
+    # Vert Foncé -> Vert Clair -> Gris (Neutre) -> Rouge Clair -> Rouge Foncé
+    if score >= 8.5: return "#006400" # Strongest Green
+    if score >= 7.0: return "#228B22" # Green
+    if score >= 6.0: return "#3CB371" # Medium Sea Green
+    if score >= 5.5: return "#3d4d3d" # Slight Greenish Grey
     
-    score_int = int(round(score))
-    score_int = max(0, min(9, score_int)) # Index 0-9
+    if score <= 1.5: return "#8B0000" # Strongest Red
+    if score <= 3.0: return "#B22222" # Firebrick
+    if score <= 4.0: return "#CD5C5C" # Indian Red
+    if score <= 4.5: return "#4d3d3d" # Slight Reddish Grey
     
-    segments = ""
-    for i in range(10):
-        # Couleur dynamique selon la position dans l'échelle
-        base_color = colors[i]
-        
-        # Logique d'allumage : On allume tout ce qui est "avant" le score pour faire une barre de progression ?
-        # NON, pour un indicateur type RSI/Force, on veut souvent voir l'intensité.
-        # Approche "Equalizer" :
-        
-        # Opacité : Allumé si i <= score (Barre pleine)
-        opacity = "1.0" if i <= score else "0.15"
-        
-        # Si c'est neutre (milieu), on garde gris foncé
-        bg = base_color
-        
-        # Effet Néon seulement sur les segments allumés actifs
-        shadow = f"0 0 5px {bg}" if opacity == "1.0" else "none"
-        
-        segments += f'<div class="segment" style="background:{bg}; opacity:{opacity}; box-shadow:{shadow};"></div>'
+    return "#2c2c2c" # Neutral Grey
+
+def render_heatmap(df_subset):
+    html_block = '<div class="heatmap-container">'
     
-    cursor_pos = (score / 10) * 100
-    
-    return f"""
-    <div style="position:relative;">
-        <div class="gauge-container">{segments}</div>
-        <div class="cursor-marker" style="left:{cursor_pos}%;"></div>
-    </div>
-    """
+    for _, row in df_subset.iterrows():
+        score = row['score']
+        name = row['name']
+        
+        bg_color = get_color_for_score(score)
+        
+        tile_html = f"""
+        <div class="market-tile" style="background-color: {bg_color};">
+            <div class="tile-symbol">{name}</div>
+            <div class="tile-score">{score:.1f}</div>
+        </div>
+        """
+        html_block += tile_html
+        
+    html_block += '</div>'
+    st.markdown(html_block, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 4. RENDU STREAMLIT (GRID)
+# 4. INTERFACE
 # ------------------------------------------------------------
+st.title("🗺️ Forex Market Map")
+st.write("Vue synthétique type 'Heatmap'. Vert = Hausse (Acheteur), Rouge = Baisse (Vendeur).")
 
-st.title("🌐 Global Market Pulse")
-st.write("Analyse de momentum cross-assets (Paires, Indices, Métaux).")
-
-if st.button("Actualiser les données", type="primary"):
-    with st.spinner("Analyse du marché..."):
-        df = compute_pair_strength()
+if st.button("🔄 Scanner le Marché", type="primary"):
+    with st.spinner("Analyse des flux..."):
+        df = get_market_data(CONFIG)
         
         if not df.empty:
             
-            # Fonction pour afficher une grille d'une catégorie donnée
-            def display_category(category_name, filter_key):
-                subset = df[df['category'] == filter_key]
-                if subset.empty: return
-                
-                st.markdown(f"<div class='section-title'>{category_name}</div>", unsafe_allow_html=True)
-                
-                # Création de 4 colonnes
-                cols = st.columns(4)
-                
-                for idx, (ticker, row) in enumerate(subset.iterrows()):
-                    score = row['score']
-                    name = row['display_name']
-                    
-                    # Couleur du texte du score
-                    if score >= 7: score_color = "#00e676" # Vert vif
-                    elif score <= 3: score_color = "#ff5252" # Rouge vif
-                    else: score_color = "#b0b0b0" # Gris
-                    
-                    # Choix de la colonne (0, 1, 2, 3)
-                    col_idx = idx % 4
-                    
-                    with cols[col_idx]:
-                        gauge_html = get_mini_gauge(score)
-                        
-                        # Carte HTML complète
-                        card_html = f"""
-                        <div class="metric-card">
-                            <div class="card-header">
-                                <span class="symbol-text">{name}</span>
-                                <span class="score-text" style="color:{score_color}">{score:.1f}</span>
-                            </div>
-                            {gauge_html}
-                        </div>
-                        """
-                        st.markdown(card_html, unsafe_allow_html=True)
-
-            # Affichage par catégories
-            display_category("📊 Indices & Actions", "INDICES")
-            display_category("🪙 Matières Premières", "COMMODITIES")
-            display_category("💱 Forex (Majeurs & Cross)", "FX")
-
-else:
-    st.info("Cliquez sur le bouton pour scanner les marchés.")
+            # --- SECTION FOREX ---
+            st.markdown('<div class="section-header">💱 FOREX (Majeurs & Cross)</div>', unsafe_allow_html=True)
+            fx_data = df[df['category'] == 'FOREX']
+            render_heatmap(fx_data)
+            
+            # --- SECTION INDICES ---
+            st.markdown('<div class="section-header">📊 INDICES & ACTIONS</div>', unsafe_allow_html=True)
+            ind_data = df[df['category'] == 'INDICES']
+            render_heatmap(ind_data)
+            
+            # --- SECTION COMMODITIES ---
+            st.markdown('<div class="section-header">🪙 MATIÈRES PREMIÈRES</div>', unsafe_allow_html=True)
+            com_data = df[df['category'] == 'COMMODITIES']
+            render_heatmap(com_data)
+            
+        else:
+            st.error("Aucune donnée récupérée. Vérifiez votre connexion.")
