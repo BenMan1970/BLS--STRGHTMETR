@@ -5,101 +5,83 @@ import yfinance as yf
 from scipy.stats import zscore
 
 # ------------------------------------------------------------
-# 1. STYLE CSS (DESIGN TUILES)
+# 1. STYLE CSS
 # ------------------------------------------------------------
-st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
+st.set_page_config(page_title="Forex Currency Matrix", layout="wide")
 
 st.markdown("""
 <style>
-    /* Fond sombre global */
     .stApp { background-color: #0e1117; }
-
-    /* CONTENEUR PRINCIPAL FLEXBOX (Pour aligner les tuiles) */
-    .heatmap-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-start;
-        padding: 10px 0;
-        width: 100%;
+    
+    .matrix-container {
+        display: inline-block;
+        margin: 20px 0;
     }
-
-    /* LA TUILE (Carte rectangulaire) */
-    .market-tile {
-        display: inline-flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        width: 120px;
-        height: 70px;
-        border-radius: 6px;
-        color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        border: 1px solid rgba(255,255,255,0.08);
+    
+    .matrix-table {
+        border-collapse: collapse;
+        font-family: Arial, sans-serif;
+    }
+    
+    .matrix-cell {
+        width: 100px;
+        height: 50px;
+        text-align: center;
+        vertical-align: middle;
+        border: 1px solid rgba(255,255,255,0.1);
         transition: transform 0.2s;
     }
     
-    .market-tile:hover {
-        transform: translateY(-3px);
+    .matrix-cell:hover {
+        transform: scale(1.05);
         border-color: rgba(255,255,255,0.5);
         cursor: pointer;
-    }
-
-    /* Texte SYMBOLE (ex: EURUSD) */
-    .tile-symbol {
-        font-family: 'Arial', sans-serif;
-        font-weight: 800;
-        font-size: 14px;
-        margin-bottom: 4px;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        z-index: 10;
+        position: relative;
     }
     
-    /* Texte SCORE (ex: 7.8) */
-    .tile-score {
-        font-family: 'Courier New', monospace;
-        font-weight: bold;
-        font-size: 15px;
-        background-color: rgba(0,0,0,0.3);
-        padding: 2px 8px;
-        border-radius: 4px;
+    .cell-pair {
+        font-weight: 700;
+        font-size: 11px;
+        display: block;
+        margin-bottom: 3px;
     }
-
-    /* TITRES DES SECTIONS */
-    .section-header {
-        font-family: 'Helvetica', sans-serif;
-        font-size: 18px;
+    
+    .cell-value {
         font-weight: 600;
+        font-size: 13px;
+        font-family: 'Courier New', monospace;
+    }
+    
+    .header-cell {
+        background-color: #1a1a1a;
         color: #8b949e;
-        margin-top: 25px;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #30363d;
-        padding-bottom: 5px;
-        width: 100%;
+        font-weight: 700;
+        font-size: 14px;
+        width: 100px;
+        height: 50px;
+        text-align: center;
+        vertical-align: middle;
+        border: 1px solid rgba(255,255,255,0.1);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 2. CONFIGURATION DES ACTIFS
+# 2. CONFIGURATION
 # ------------------------------------------------------------
 CONFIG = {
-    'tickers': [
-        # FOREX
-        'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
-        'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
-        'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
-        'AUDJPY=X', 'AUDCAD=X', 'AUDNZD=X', 'AUDCHF=X',
-        'CADJPY=X', 'CADCHF=X', 'NZDJPY=X', 'NZDCHF=X', 'CHFJPY=X',
-        # INDICES
-        '^DJI', '^GSPC', '^IXIC', '^FCHI', '^GDAXI',
-        # MATIÈRES PREMIÈRES
-        'GC=F', 'CL=F', 'SI=F', 'HG=F'
-    ],
-    'period': '60d', 'interval': '1d', 'lookback_days': 3, 'atr_period': 14
+    'period': '60d',
+    'interval': '1d',
+    'lookback_days': 3,
+    'atr_period': 14
 }
 
+# Devises principales pour la matrice
+CURRENCIES = ['EUR', 'USD', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD']
+
 # ------------------------------------------------------------
-# 3. MOTEUR DE CALCUL (DATA)
+# 3. MOTEUR DE CALCUL
 # ------------------------------------------------------------
 def calculate_atr(df, period=14):
     high_low = df['High'] - df['Low']
@@ -108,217 +90,254 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period, min_periods=1).mean()
 
-def get_market_data(config):
-    tickers = config['tickers']
-    # Téléchargement optimisé
-    data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
+def get_pair_ticker(base, quote):
+    """Convertit une paire de devises en ticker Yahoo Finance"""
+    pair = f"{base}{quote}"
+    # Mappings spéciaux
+    if pair in ['EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD']:
+        return f"{pair}=X"
+    elif pair in ['USDJPY', 'USDCHF', 'USDCAD']:
+        return f"{pair}=X"
+    else:
+        return f"{pair}=X"
+
+def calculate_pair_strength(base, quote, config):
+    """Calcule la force relative d'une paire"""
+    ticker = get_pair_ticker(base, quote)
     
+    try:
+        df = yf.download(ticker, period=config['period'], interval=config['interval'], progress=False)
+        if df.empty or len(df) < 20:
+            return None
+            
+        close = df['Close']
+        price_now = close.iloc[-1]
+        price_past = close.shift(config['lookback_days']).iloc[-1]
+        
+        if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
+            return None
+
+        # Calcul de la force
+        raw_move_pct = (price_now - price_past) / price_past
+        atr = calculate_atr(df, config['atr_period']).iloc[-1]
+        atr_pct = (atr / price_now) if price_now != 0 else 0.001
+        strength = raw_move_pct / max(atr_pct, 0.0001)
+        
+        return {
+            'raw_score': strength,
+            'pct_change': raw_move_pct * 100
+        }
+    except:
+        return None
+
+def get_all_pairs_data(currencies, config):
+    """Récupère toutes les données des paires"""
     results = {}
     
-    for ticker in tickers:
-        try:
-            df = data[ticker].dropna()
-            if len(df) < 20: continue
-            
-            close = df['Close']
-            price_now = close.iloc[-1]
-            price_past = close.shift(config['lookback_days']).iloc[-1]
-            
-            if pd.isna(price_now) or pd.isna(price_past) or price_past == 0: continue
-
-            # Calculs
-            raw_move_pct = (price_now - price_past) / price_past
-            atr = calculate_atr(df, config['atr_period']).iloc[-1]
-            atr_pct = (atr / price_now) if price_now != 0 else 0.001
-            strength = raw_move_pct / max(atr_pct, 0.0001)
-            
-            # Catégories
-            if "=X" in ticker: cat = "FOREX"
-            elif "=F" in ticker: cat = "COMMODITIES"
-            elif "^" in ticker: cat = "INDICES"
-            else: cat = "OTHER"
-            
-            # Nettoyage des noms
-            display_name = ticker.replace('=X','').replace('=F','').replace('^','')
-            mapping = {'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'}
-            display_name = mapping.get(display_name, display_name)
-
-            results[ticker] = {
-                'name': display_name,
-                'raw_score': strength,
-                'category': cat
-            }
-        except KeyError:
-            continue
-
-    if not results: return pd.DataFrame()
-
-    df_res = pd.DataFrame.from_dict(results, orient='index')
+    with st.spinner("Téléchargement des données..."):
+        progress_bar = st.progress(0)
+        total = len(currencies) * len(currencies)
+        current = 0
+        
+        for base in currencies:
+            for quote in currencies:
+                if base == quote:
+                    results[(base, quote)] = None
+                else:
+                    data = calculate_pair_strength(base, quote, config)
+                    results[(base, quote)] = data
+                
+                current += 1
+                progress_bar.progress(current / total)
+        
+        progress_bar.empty()
     
-    # Normalisation sur 0-10
-    vals = df_res['raw_score'].values
-    z = zscore(vals)
+    return results
+
+def normalize_scores(results):
+    """Normalise les scores sur 0-10"""
+    valid_scores = [v['raw_score'] for v in results.values() if v is not None]
+    
+    if not valid_scores:
+        return results
+    
+    z = zscore(valid_scores)
     z = np.clip(np.nan_to_num(z), -2.5, 2.5)
-    df_res['score'] = 5 + (z / 5) * 10
-    df_res['score'] = df_res['score'].clip(0, 10)
+    normalized = 5 + (z / 5) * 10
+    normalized = np.clip(normalized, 0, 10)
     
-    return df_res.sort_values(by='score', ascending=False)
+    idx = 0
+    for key in results:
+        if results[key] is not None:
+            results[key]['score'] = normalized[idx]
+            idx += 1
+    
+    return results
 
 # ------------------------------------------------------------
-# 4. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
+# 4. GÉNÉRATEUR DE MATRICE HTML
 # ------------------------------------------------------------
 def get_color(score):
-    # Palette Finviz: Vert Foncé (Achat Fort) -> Rouge Foncé (Vente Forte)
-    if score >= 8.5: return "#064e3b" # Vert Foncé
-    if score >= 7.0: return "#15803d" # Vert
-    if score >= 6.0: return "#22c55e" # Vert Clair
-    if score >= 5.5: return "#4b5563" # Gris-Vert
+    """Palette de couleurs basée sur le score"""
+    if score is None:
+        return "#1a1a1a"
     
-    if score <= 1.5: return "#7f1d1d" # Rouge Foncé
-    if score <= 3.0: return "#b91c1c" # Rouge
-    if score <= 4.0: return "#ef4444" # Rouge Clair
-    if score <= 4.5: return "#4b5563" # Gris-Rouge
+    if score >= 8.5: return "#064e3b"  # Vert Foncé
+    if score >= 7.0: return "#15803d"  # Vert
+    if score >= 6.0: return "#22c55e"  # Vert Clair
+    if score >= 5.5: return "#4b5563"  # Gris-Vert
     
-    return "#374151" # Gris Neutre
+    if score <= 1.5: return "#7f1d1d"  # Rouge Foncé
+    if score <= 3.0: return "#b91c1c"  # Rouge
+    if score <= 4.0: return "#ef4444"  # Rouge Clair
+    if score <= 4.5: return "#4b5563"  # Gris-Rouge
+    
+    return "#374151"  # Gris Neutre
 
-def generate_full_html_report(df):
-    """
-    Génère le HTML complet avec toutes les sections dans un seul bloc
-    """
-    if df.empty: return "<div style='color:red'>Aucune donnée.</div>"
+def generate_currency_matrix(currencies, data):
+    """Génère la matrice HTML des devises"""
+    html = '<div class="matrix-container"><table class="matrix-table">'
     
-    # Définition des sections
-    sections = [
-        ("💱 FOREX (Paires Majeures & Croisées)", 'FOREX'),
-        ("📊 INDICES MONDIAUX", 'INDICES'),
-        ("🪙 MATIÈRES PREMIÈRES", 'COMMODITIES')
-    ]
+    # Ligne d'en-tête
+    html += '<tr><td class="header-cell"></td>'
+    for quote in currencies:
+        html += f'<td class="header-cell">{quote}</td>'
+    html += '</tr>'
     
-    # Construction du HTML en une seule fois
-    tiles_html = ""
+    # Lignes de données
+    for base in currencies:
+        html += f'<tr><td class="header-cell">{base}</td>'
+        
+        for quote in currencies:
+            if base == quote:
+                # Cellule diagonale
+                html += f'<td class="matrix-cell header-cell">{base}</td>'
+            else:
+                pair_data = data.get((base, quote))
+                
+                if pair_data is None:
+                    html += '<td class="matrix-cell" style="background-color: #1a1a1a; color: #666;">-</td>'
+                else:
+                    score = pair_data.get('score', 5)
+                    pct = pair_data.get('pct_change', 0)
+                    color = get_color(score)
+                    
+                    html += f'''
+                    <td class="matrix-cell" style="background-color: {color}; color: white;">
+                        <span class="cell-pair">{base}/{quote}</span>
+                        <span class="cell-value">{pct:+.2f}%</span>
+                    </td>
+                    '''
+        
+        html += '</tr>'
     
-    for title, cat_key in sections:
-        subset = df[df['category'] == cat_key]
-        if subset.empty: continue
-        
-        # Ajouter le titre de section
-        tiles_html += f'<div class="section-header">{title}</div>'
-        
-        # Ouvrir le conteneur
-        tiles_html += '<div class="heatmap-container">'
-        
-        # Ajouter toutes les tuiles
-        for _, row in subset.iterrows():
-            score = row['score']
-            name = row['name']
-            bg_color = get_color(score)
-            
-            tiles_html += f'''
-            <div class="market-tile" style="background-color: {bg_color};">
-                <div class="tile-symbol">{name}</div>
-                <div class="tile-score">{score:.1f}</div>
-            </div>
-            '''
-        
-        # Fermer le conteneur
-        tiles_html += '</div>'
-    
-    return tiles_html
+    html += '</table></div>'
+    return html
 
 # ------------------------------------------------------------
 # 5. APPLICATION STREAMLIT
 # ------------------------------------------------------------
-st.title("🗺️ Market Heatmap Pro")
-st.write("Analyse de force relative. Vert = Acheteur | Rouge = Vendeur.")
+st.title("💱 Forex Currency Strength Matrix")
+st.write("Matrice de force des devises. Vert = Force relative | Rouge = Faiblesse relative")
 
-if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
-    with st.spinner("Téléchargement et calculs en cours..."):
-        # 1. Calculs
-        df_results = get_market_data(CONFIG)
-        
-        if not df_results.empty:
-            # 2. Génération et affichage du HTML
-            html_content = generate_full_html_report(df_results)
-            
-            # 3. Affichage avec components.html pour un meilleur rendu
-            st.components.v1.html(
-                f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <style>
-                        body {{
-                            margin: 0;
-                            padding: 0;
-                            background-color: transparent;
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        }}
-                        .heatmap-container {{
-                            display: flex;
-                            flex-wrap: wrap;
-                            gap: 8px;
-                            justify-content: flex-start;
-                            padding: 10px 0;
-                            width: 100%;
-                        }}
-                        .market-tile {{
-                            display: inline-flex;
-                            flex-direction: column;
-                            justify-content: center;
-                            align-items: center;
-                            width: 120px;
-                            height: 70px;
-                            border-radius: 6px;
-                            color: white;
-                            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-                            border: 1px solid rgba(255,255,255,0.08);
-                            transition: transform 0.2s;
-                        }}
-                        .market-tile:hover {{
-                            transform: translateY(-3px);
-                            border-color: rgba(255,255,255,0.5);
-                            cursor: pointer;
-                        }}
-                        .tile-symbol {{
-                            font-family: 'Arial', sans-serif;
-                            font-weight: 800;
-                            font-size: 14px;
-                            margin-bottom: 4px;
-                            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-                        }}
-                        .tile-score {{
-                            font-family: 'Courier New', monospace;
-                            font-weight: bold;
-                            font-size: 15px;
-                            background-color: rgba(0,0,0,0.3);
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        }}
-                        .section-header {{
-                            font-family: 'Helvetica', sans-serif;
-                            font-size: 18px;
-                            font-weight: 600;
-                            color: #8b949e;
-                            margin-top: 25px;
-                            margin-bottom: 10px;
-                            border-bottom: 1px solid #30363d;
-                            padding-bottom: 5px;
-                            width: 100%;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    {html_content}
-                </body>
-                </html>
-                """,
-                height=800,
-                scrolling=True
-            )
-            
-        else:
-            st.error("Erreur de récupération des données. Vérifiez votre connexion.")
+col1, col2 = st.columns([1, 3])
+
+with col1:
+    st.markdown("### Paramètres")
+    lookback = st.slider("Période d'analyse (jours)", 1, 10, CONFIG['lookback_days'])
+    CONFIG['lookback_days'] = lookback
+
+if st.button("🚀 ANALYSER LE MARCHÉ", type="primary"):
+    # Récupération des données
+    data = get_all_pairs_data(CURRENCIES, CONFIG)
+    
+    # Normalisation
+    data = normalize_scores(data)
+    
+    # Génération et affichage
+    matrix_html = generate_currency_matrix(CURRENCIES, data)
+    
+    st.components.v1.html(
+        f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{
+                    margin: 0;
+                    padding: 20px;
+                    background-color: transparent;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                }}
+                .matrix-container {{
+                    display: inline-block;
+                    margin: 0 auto;
+                }}
+                .matrix-table {{
+                    border-collapse: collapse;
+                    font-family: Arial, sans-serif;
+                }}
+                .matrix-cell {{
+                    width: 100px;
+                    height: 50px;
+                    text-align: center;
+                    vertical-align: middle;
+                    border: 1px solid rgba(255,255,255,0.1);
+                    transition: transform 0.2s;
+                }}
+                .matrix-cell:hover {{
+                    transform: scale(1.05);
+                    border-color: rgba(255,255,255,0.5);
+                    cursor: pointer;
+                    z-index: 10;
+                    position: relative;
+                }}
+                .cell-pair {{
+                    font-weight: 700;
+                    font-size: 11px;
+                    display: block;
+                    margin-bottom: 3px;
+                }}
+                .cell-value {{
+                    font-weight: 600;
+                    font-size: 13px;
+                    font-family: 'Courier New', monospace;
+                }}
+                .header-cell {{
+                    background-color: #1a1a1a;
+                    color: #8b949e;
+                    font-weight: 700;
+                    font-size: 14px;
+                    width: 100px;
+                    height: 50px;
+                    text-align: center;
+                    vertical-align: middle;
+                    border: 1px solid rgba(255,255,255,0.1);
+                }}
+            </style>
+        </head>
+        <body>
+            {matrix_html}
+        </body>
+        </html>
+        """,
+        height=550,
+        scrolling=False
+    )
+    
+    # Légende
+    st.markdown("---")
+    st.markdown("""
+    **Comment lire la matrice :**
+    - 🟢 **Vert** : La devise de base (ligne) est forte par rapport à la devise de cotation (colonne)
+    - 🔴 **Rouge** : La devise de base (ligne) est faible par rapport à la devise de cotation (colonne)
+    - Le pourcentage indique la variation sur la période choisie
+    """)
 
 else:
-    st.info("Cliquez sur le bouton pour lancer l'analyse.")
-  
+    st.info("👆 Cliquez sur le bouton pour générer la matrice des forces des devises")
+    
+    # Exemple visuel
+    st.markdown("### Exemple de matrice")
+    st.image("https://via.placeholder.com/800x400/0e1117/8b949e?text=Matrice+des+devises", 
+             caption="La matrice affichera toutes les paires croisées avec vos couleurs")
