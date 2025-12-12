@@ -69,7 +69,6 @@ def calculate_atr(df, period=14):
 # Palette de couleurs
 # ----------------------------
 def get_color_from_score(score):
-    """Retourne la couleur exacte selon le score"""
     if score <= 2:
         return '#dc2626'  # Rouge fort
     elif score <= 4:
@@ -82,7 +81,6 @@ def get_color_from_score(score):
         return '#06b6d4'  # Cyan
 
 def get_strength_label(score):
-    """Retourne le label de force"""
     if score <= 2:
         return "Très Faible"
     elif score <= 4:
@@ -95,74 +93,59 @@ def get_strength_label(score):
         return "Très Fort"
 
 # ----------------------------
-# CORE: compute_strength
+# CORE: compute_strength (avec cache pour perf)
 # ----------------------------
+@st.cache_data(ttl=300)  # Cache 5 min pour données live
 def compute_strength(config=CONFIG):
     tickers_cfg = config['tickers']
     lookback = config['lookback_days']
     atr_period = config['atr_period']
     atr_floor_pct = config['atr_floor_pct']
-
     all_tickers = list(tickers_cfg.keys())
-
     try:
         data = yf.download(all_tickers, period=config['period'], interval=config['interval'],
-                           group_by='ticker', progress=False, threads=True)
+                           progress=False, threads=False)  # threads=False pour Streamlit
     except Exception as e:
         st.error(f"❌ Erreur téléchargement yfinance: {e}")
         return pd.DataFrame()
-
+    
     entities = set()
-    for t, v in tickers_cfg.items():
+    for v in tickers_cfg.values():
         entities.add(v[1])
         entities.add(v[2])
-
+    
     scores_acc = {e: {'weighted_sum': 0.0, 'total_weight': 0.0} for e in entities}
-
+    
     for ticker, info in tickers_cfg.items():
         weight, base, quote, category = info
-
-        try:
-            if ticker not in data.columns.get_level_values(0):
-                continue
-            df = data[ticker].dropna()
-        except Exception:
-            try:
-                df = data.dropna()
-            except Exception:
-                continue
-
+        if ticker not in data.columns.get_level_values(1):  # Niveau 1 = tickers maintenant
+            continue
+        df = data.xs(ticker, level=1, axis=1).dropna()
         if df.empty or len(df) < max(atr_period + 2, lookback + 2):
             continue
-
         close = df['Close']
         price_now = close.iloc[-1]
         price_past = close.shift(lookback).iloc[-1]
         if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
             continue
-
         raw_move_pct = (price_now - price_past) / price_past
-
         atr = calculate_atr(df, period=atr_period)
         current_atr = atr.iloc[-1]
         atr_pct = current_atr / price_now if price_now != 0 else atr_floor_pct
         if pd.isna(atr_pct) or atr_pct <= 0:
             atr_pct = atr_floor_pct
         atr_pct = max(atr_pct, atr_floor_pct)
-
         strength = raw_move_pct / atr_pct
-
         scores_acc[base]['weighted_sum'] += strength * weight
         scores_acc[base]['total_weight'] += weight
         scores_acc[quote]['weighted_sum'] += (-strength) * weight
         scores_acc[quote]['total_weight'] += weight
-
+    
     raw_values = {}
     for ent, v in scores_acc.items():
         raw_values[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0.0
-
+    
     df_raw = pd.Series(raw_values, name='raw_strength').to_frame()
-
     vals = df_raw['raw_strength'].values
     if np.nanstd(vals) == 0:
         z = np.zeros_like(vals)
@@ -172,16 +155,12 @@ def compute_strength(config=CONFIG):
     z = np.clip(z, -3, 3)
     scaled = 5 + (z / 6) * 10
     scaled = np.clip(scaled, 0, 10)
-
     df_raw['score'] = np.round(scaled, 2)
-
     if config['smoothing_span'] > 1:
         df_raw['score_smoothed'] = df_raw['score'].ewm(span=config['smoothing_span'], adjust=False).mean()
     else:
         df_raw['score_smoothed'] = df_raw['score']
-
     df_raw = df_raw.sort_values(by='score_smoothed', ascending=False)
-
     return df_raw
 
 # ----------------------------
@@ -194,204 +173,41 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# CSS Moderne avec Gauges
+# CSS Moderne avec Gauges (simplifié un peu)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    
-    [data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        font-family: 'Inter', sans-serif;
-    }
-    
-    .main-header {
-        text-align: center;
-        padding: 1.5rem 0;
-        background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.5rem;
-        font-weight: 700;
-    }
-    
-    .subtitle {
-        text-align: center;
-        color: #94a3b8;
-        font-size: 1rem;
-        margin-bottom: 2rem;
-    }
-    
-    /* GAUGE THERMOMETRE */
-    .gauge-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 1.5rem;
-        margin: 2rem 0;
-    }
-    
-    .gauge-card {
-        background: rgba(30, 41, 59, 0.6);
-        backdrop-filter: blur(10px);
-        border-radius: 16px;
-        padding: 1.25rem;
-        border: 1px solid rgba(148, 163, 184, 0.1);
-        transition: all 0.3s ease;
-        text-align: center;
-    }
-    
-    .gauge-card:hover {
-        transform: translateY(-5px);
-        border-color: rgba(148, 163, 184, 0.3);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    }
-    
-    .gauge-label {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #e2e8f0;
-        margin-bottom: 1rem;
-        letter-spacing: 0.5px;
-    }
-    
-    .thermometer {
-        width: 60px;
-        height: 200px;
-        margin: 0 auto 1rem;
-        position: relative;
-        background: rgba(15, 23, 42, 0.8);
-        border-radius: 30px;
-        padding: 8px;
-        box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
-    }
-    
-    .thermo-fill {
-        position: absolute;
-        bottom: 8px;
-        left: 8px;
-        right: 8px;
-        border-radius: 22px;
-        transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 0 20px currentColor;
-    }
-    
-    .thermo-bulb {
-        position: absolute;
-        bottom: -15px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 50px;
-        height: 50px;
-        border-radius: 50%;
-        transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 0 25px currentColor;
-    }
-    
-    .score-display {
-        font-size: 2rem;
-        font-weight: 700;
-        margin: 0.5rem 0;
-    }
-    
-    .strength-label {
-        font-size: 0.85rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        opacity: 0.9;
-    }
-    
-    /* Section Headers */
-    .section-header {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.75rem;
-        margin: 2.5rem 0 1.5rem 0;
-        padding: 1rem;
-        background: rgba(51, 65, 85, 0.3);
-        border-radius: 12px;
-        border-left: 4px solid #3b82f6;
-    }
-    
-    .section-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #f1f5f9;
-        margin: 0;
-    }
-    
-    /* Bouton */
-    .stButton > button {
-        width: 100%;
-        background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-        color: white;
-        font-weight: 600;
-        font-size: 1.1rem;
-        padding: 0.8rem 2rem;
-        border: none;
-        border-radius: 12px;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4);
-    }
-    
-    .info-box {
-        background: rgba(59, 130, 246, 0.1);
-        border-left: 4px solid #3b82f6;
-        padding: 1rem 1.25rem;
-        border-radius: 8px;
-        color: #bfdbfe;
-        margin: 1rem 0;
-    }
-    
-    /* Compact Table */
-    .compact-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 1rem 0;
-        background: rgba(30, 41, 59, 0.4);
-        border-radius: 12px;
-        overflow: hidden;
-    }
-    
-    .compact-table th {
-        background: rgba(51, 65, 85, 0.6);
-        color: #94a3b8;
-        padding: 0.75rem;
-        font-weight: 600;
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .compact-table td {
-        padding: 0.6rem 0.75rem;
-        color: #e2e8f0;
-        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-    }
-    
-    .compact-table tr:hover {
-        background: rgba(51, 65, 85, 0.3);
-    }
-    
-    @media (max-width: 768px) {
-        .gauge-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
-        .thermometer { width: 50px; height: 160px; }
-        .thermo-bulb { width: 40px; height: 40px; }
-    }
+    [data-testid="stAppViewContainer"] { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); font-family: 'Inter', sans-serif; }
+    .main-header { text-align: center; padding: 1.5rem 0; background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 700; }
+    .subtitle { text-align: center; color: #94a3b8; font-size: 1rem; margin-bottom: 2rem; }
+    .gauge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+    .gauge-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border-radius: 16px; padding: 1.25rem; border: 1px solid rgba(148, 163, 184, 0.1); transition: all 0.3s ease; text-align: center; }
+    .gauge-card:hover { transform: translateY(-5px); border-color: rgba(148, 163, 184, 0.3); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+    .gauge-label { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; margin-bottom: 1rem; letter-spacing: 0.5px; }
+    .thermometer { width: 60px; height: 200px; margin: 0 auto 1rem; position: relative; background: rgba(15, 23, 42, 0.8); border-radius: 30px; padding: 8px; box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4); }
+    .thermo-fill { position: absolute; bottom: 8px; left: 8px; right: 8px; border-radius: 22px; transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 20px currentColor; }
+    .thermo-bulb { position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%); width: 50px; height: 50px; border-radius: 50%; transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 25px currentColor; }
+    .score-display { font-size: 2rem; font-weight: 700; margin: 0.5rem 0; }
+    .strength-label { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9; }
+    .section-header { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin: 2.5rem 0 1.5rem 0; padding: 1rem; background: rgba(51, 65, 85, 0.3); border-radius: 12px; border-left: 4px solid #3b82f6; }
+    .section-title { font-size: 1.5rem; font-weight: 700; color: #f1f5f9; margin: 0; }
+    .stButton > button { width: 100%; background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%); color: white; font-weight: 600; font-size: 1.1rem; padding: 0.8rem 2rem; border: none; border-radius: 12px; transition: all 0.3s ease; }
+    .stButton > button:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4); }
+    .info-box { background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; padding: 1rem 1.25rem; border-radius: 8px; color: #bfdbfe; margin: 1rem 0; }
+    .compact-table { width: 100%; border-collapse: collapse; margin: 1rem 0; background: rgba(30, 41, 59, 0.4); border-radius: 12px; overflow: hidden; }
+    .compact-table th { background: rgba(51, 65, 85, 0.6); color: #94a3b8; padding: 0.75rem; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    .compact-table td { padding: 0.6rem 0.75rem; color: #e2e8f0; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
+    .compact-table tr:hover { background: rgba(51, 65, 85, 0.3); }
+    @media (max-width: 768px) { .gauge-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); } .thermometer { width: 50px; height: 160px; } .thermo-bulb { width: 40px; height: 40px; } }
 </style>
 """, unsafe_allow_html=True)
 
 # Header
 st.markdown('<h1 class="main-header">🌡️ Strength Meter PRO</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Vue Thermomètre - Analyse de force instantanée</p>', unsafe_allow_html=True)
-
 st.markdown("""
 <div class="info-box">
-    <strong>🎯 Méthodologie :</strong> ATR normalisé + Z-score | 
+    <strong>🎯 Méthodologie :</strong> ATR normalisé + Z-score |
     <strong>📊 33 Assets :</strong> 28 paires FX + 2 métaux + 3 indices
 </div>
 """, unsafe_allow_html=True)
@@ -400,8 +216,7 @@ st.markdown("""
 if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
     with st.spinner("⏳ Calcul en cours..."):
         df_entities = compute_strength(CONFIG)
-
-    if df_entities is None or df_entities.empty:
+    if df_entities.empty:
         st.error("❌ Aucune donnée calculée.")
     else:
         # VUE PRINCIPALE: GAUGES THERMOMÈTRES
@@ -414,13 +229,11 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
         
         # Création des gauges en HTML
         gauge_html = '<div class="gauge-grid">'
-        
         for ent in df_entities.index:
             score = float(df_entities.loc[ent, 'score_smoothed'])
             height_pct = max(min(score / 10.0, 1.0), 0.0) * 100
             color = get_color_from_score(score)
             label = get_strength_label(score)
-            
             gauge_html += f"""
             <div class="gauge-card">
                 <div class="gauge-label">{ent}</div>
@@ -432,7 +245,6 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
                 <div class="strength-label" style="color: {color};">{label}</div>
             </div>
             """
-        
         gauge_html += '</div>'
         st.markdown(gauge_html, unsafe_allow_html=True)
         
@@ -455,7 +267,6 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
                 pair_score = float(np.clip(pair_score, 0.0, 10.0))
             else:
                 pair_score = 5.0
-            
             pairs_list.append({
                 'Paire': ticker.replace('=X', '').replace('^', '').replace('=F', ''),
                 'Base': base,
@@ -464,18 +275,13 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
                 'Force': get_strength_label(pair_score),
                 'Catégorie': category
             })
-
         df_pairs = pd.DataFrame(pairs_list).sort_values(by='Score', ascending=False).reset_index(drop=True)
         
         # Affichage en tableau compact avec style
-        table_html = '<table class="compact-table"><thead><tr>'
-        table_html += '<th>Paire</th><th>Base</th><th>Quote</th><th>Score</th><th>Force</th><th>Catégorie</th>'
-        table_html += '</tr></thead><tbody>'
-        
+        table_html = '<table class="compact-table"><thead><tr><th>Paire</th><th>Base</th><th>Quote</th><th>Score</th><th>Force</th><th>Catégorie</th></tr></thead><tbody>'
         for _, row in df_pairs.iterrows():
             color = get_color_from_score(row['Score'])
             icon = '💱' if row['Catégorie'] == 'FX' else ('🥇' if row['Catégorie'] == 'METAL' else '📈')
-            
             table_html += f"""
             <tr>
                 <td style="font-weight: 600;">{row['Paire']}</td>
@@ -486,7 +292,6 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
                 <td>{icon} {row['Catégorie']}</td>
             </tr>
             """
-        
         table_html += '</tbody></table>'
         st.markdown(table_html, unsafe_allow_html=True)
         
@@ -501,7 +306,6 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
             mime='text/csv',
             use_container_width=True
         )
-
 else:
     st.markdown("""
     <div class="info-box">
