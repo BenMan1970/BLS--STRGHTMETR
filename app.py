@@ -1,4 +1,4 @@
-# app.py — Strength Meter PRO (Version Modernisée)
+# app.py — Strength Meter PRO (Vue Gauge/Thermomètre)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -18,38 +18,30 @@ CONFIG = {
         'AUDUSD=X': [14.0, 'AUD', 'USD', 'FX'],
         'USDCAD=X': [13.0, 'USD', 'CAD', 'FX'],
         'NZDUSD=X': [12.0, 'NZD', 'USD', 'FX'],
-        
         'EURGBP=X': [11.0, 'EUR', 'GBP', 'FX'],
         'EURJPY=X': [10.0, 'EUR', 'JPY', 'FX'],
         'EURCHF=X': [9.0, 'EUR', 'CHF', 'FX'],
         'EURAUD=X': [8.0, 'EUR', 'AUD', 'FX'],
         'EURCAD=X': [7.0, 'EUR', 'CAD', 'FX'],
         'EURNZD=X': [6.0, 'EUR', 'NZD', 'FX'],
-        
         'GBPJPY=X': [9.0, 'GBP', 'JPY', 'FX'],
         'GBPCHF=X': [8.0, 'GBP', 'CHF', 'FX'],
         'GBPAUD=X': [7.0, 'GBP', 'AUD', 'FX'],
         'GBPCAD=X': [6.0, 'GBP', 'CAD', 'FX'],
         'GBPNZD=X': [5.0, 'GBP', 'NZD', 'FX'],
-        
         'AUDJPY=X': [7.0, 'AUD', 'JPY', 'FX'],
         'AUDCHF=X': [6.0, 'AUD', 'CHF', 'FX'],
         'AUDCAD=X': [5.0, 'AUD', 'CAD', 'FX'],
         'AUDNZD=X': [4.0, 'AUD', 'NZD', 'FX'],
-        
         'NZDJPY=X': [5.0, 'NZD', 'JPY', 'FX'],
         'NZDCHF=X': [4.0, 'NZD', 'CHF', 'FX'],
         'NZDCAD=X': [3.0, 'NZD', 'CAD', 'FX'],
-        
         'CADJPY=X': [5.0, 'CAD', 'JPY', 'FX'],
         'CADCHF=X': [4.0, 'CAD', 'CHF', 'FX'],
-        
         'CHFJPY=X': [4.0, 'CHF', 'JPY', 'FX'],
-        
         # MÉTAUX
         'GC=F': [15.0, 'XAU', 'USD', 'METAL'],
         'PL=F': [8.0, 'XPT', 'USD', 'METAL'],
-        
         # INDICES
         '^DJI': [12.0, 'US30', 'USD', 'INDEX'],
         '^IXIC': [12.0, 'NAS100', 'USD', 'INDEX'],
@@ -61,7 +53,6 @@ CONFIG = {
     'atr_period': 14,
     'atr_floor_pct': 1e-4,
     'smoothing_span': 3,
-    'category_mode': True
 }
 
 # ----------------------------
@@ -75,34 +66,33 @@ def calculate_atr(df, period=14):
     return tr.rolling(window=period, min_periods=1).mean()
 
 # ----------------------------
-# Palette de couleurs moderne
+# Palette de couleurs
 # ----------------------------
-def modern_color(score):
-    """Retourne une couleur gradient moderne basée sur le score"""
-    try:
-        s = float(score)
-    except Exception:
-        s = 5.0
-    
-    if s <= 2:
-        return '#ef4444'  # Rouge vif
-    elif s <= 4:
+def get_color_from_score(score):
+    """Retourne la couleur exacte selon le score"""
+    if score <= 2:
+        return '#dc2626'  # Rouge fort
+    elif score <= 4:
         return '#f97316'  # Orange
-    elif s <= 6:
-        return '#eab308'  # Jaune/Ambre
-    elif s <= 8:
+    elif score <= 6:
+        return '#eab308'  # Jaune
+    elif score <= 8:
         return '#22c55e'  # Vert
     else:
-        return '#06b6d4'  # Cyan brillant
+        return '#06b6d4'  # Cyan
 
-def get_category_icon(category):
-    """Retourne une icône pour chaque catégorie"""
-    icons = {
-        'FX': '💱',
-        'METAL': '🥇',
-        'INDEX': '📈'
-    }
-    return icons.get(category, '📊')
+def get_strength_label(score):
+    """Retourne le label de force"""
+    if score <= 2:
+        return "Très Faible"
+    elif score <= 4:
+        return "Faible"
+    elif score <= 6:
+        return "Neutre"
+    elif score <= 8:
+        return "Fort"
+    else:
+        return "Très Fort"
 
 # ----------------------------
 # CORE: compute_strength
@@ -120,7 +110,7 @@ def compute_strength(config=CONFIG):
                            group_by='ticker', progress=False, threads=True)
     except Exception as e:
         st.error(f"❌ Erreur téléchargement yfinance: {e}")
-        return pd.DataFrame(), {}
+        return pd.DataFrame()
 
     entities = set()
     for t, v in tickers_cfg.items():
@@ -128,12 +118,6 @@ def compute_strength(config=CONFIG):
         entities.add(v[2])
 
     scores_acc = {e: {'weighted_sum': 0.0, 'total_weight': 0.0} for e in entities}
-    categories = {}
-    if config['category_mode']:
-        for t, v in tickers_cfg.items():
-            cat = v[3]
-            if cat not in categories:
-                categories[cat] = {e: {'weighted_sum': 0.0, 'total_weight': 0.0} for e in entities}
 
     for ticker, info in tickers_cfg.items():
         weight, base, quote, category = info
@@ -173,12 +157,6 @@ def compute_strength(config=CONFIG):
         scores_acc[quote]['weighted_sum'] += (-strength) * weight
         scores_acc[quote]['total_weight'] += weight
 
-        if config['category_mode']:
-            categories[category][base]['weighted_sum'] += strength * weight
-            categories[category][base]['total_weight'] += weight
-            categories[category][quote]['weighted_sum'] += (-strength) * weight
-            categories[category][quote]['total_weight'] += weight
-
     raw_values = {}
     for ent, v in scores_acc.items():
         raw_values[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0.0
@@ -204,179 +182,148 @@ def compute_strength(config=CONFIG):
 
     df_raw = df_raw.sort_values(by='score_smoothed', ascending=False)
 
-    category_frames = {}
-    if config['category_mode']:
-        for cat, acc in categories.items():
-            tmp = {}
-            for ent, v in acc.items():
-                tmp[ent] = v['weighted_sum'] / v['total_weight'] if v['total_weight'] > 0 else 0.0
-            s = pd.Series(tmp)
-            if s.std() == 0:
-                zc = np.zeros_like(s.values)
-            else:
-                zc = zscore(s.values, nan_policy='omit')
-            zc = np.clip(np.nan_to_num(zc), -3, 3)
-            scaled_c = 5 + (zc / 6) * 10
-            scaled_c = np.clip(scaled_c, 0, 10)
-            category_frames[cat] = pd.DataFrame({'score': np.round(scaled_c, 2)}, index=s.index).sort_values(by='score', ascending=False)
-
-    return df_raw, category_frames
+    return df_raw
 
 # ----------------------------
-# STREAMLIT UI - Design Moderne
+# STREAMLIT UI
 # ----------------------------
 st.set_page_config(
     page_title="Strength Meter PRO",
-    page_icon="📊",
+    page_icon="🌡️",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS Moderne et Élégant
+# CSS Moderne avec Gauges
 st.markdown("""
 <style>
-    /* Import Google Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     
-    /* Background global */
     [data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         font-family: 'Inter', sans-serif;
     }
     
-    /* Header personnalisé */
     .main-header {
         text-align: center;
-        padding: 2rem 0 1rem 0;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem 0;
+        background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 3rem;
+        font-size: 2.5rem;
         font-weight: 700;
-        letter-spacing: -1px;
     }
     
     .subtitle {
         text-align: center;
         color: #94a3b8;
-        font-size: 1.1rem;
+        font-size: 1rem;
         margin-bottom: 2rem;
     }
     
-    /* Container des barres */
-    .bar-container {
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-        margin: 1.5rem 0;
+    /* GAUGE THERMOMETRE */
+    .gauge-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1.5rem;
+        margin: 2rem 0;
     }
     
-    /* Item de barre individuel */
-    .bar-item {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        padding: 1rem 1.25rem;
-        background: rgba(30, 41, 59, 0.5);
+    .gauge-card {
+        background: rgba(30, 41, 59, 0.6);
         backdrop-filter: blur(10px);
-        border-radius: 12px;
+        border-radius: 16px;
+        padding: 1.25rem;
         border: 1px solid rgba(148, 163, 184, 0.1);
         transition: all 0.3s ease;
+        text-align: center;
     }
     
-    .bar-item:hover {
-        background: rgba(30, 41, 59, 0.7);
+    .gauge-card:hover {
+        transform: translateY(-5px);
         border-color: rgba(148, 163, 184, 0.3);
-        transform: translateX(5px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
     
-    /* Label de la paire */
-    .bar-label {
-        min-width: 120px;
-        font-weight: 600;
-        font-size: 0.95rem;
+    .gauge-label {
+        font-size: 1.1rem;
+        font-weight: 700;
         color: #e2e8f0;
+        margin-bottom: 1rem;
         letter-spacing: 0.5px;
     }
     
-    /* Barre de progression */
-    .progress-bar {
-        flex: 1;
-        height: 24px;
-        background: rgba(15, 23, 42, 0.8);
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-    
-    .progress-fill {
-        height: 100%;
-        border-radius: 12px;
-        transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    .thermometer {
+        width: 60px;
+        height: 200px;
+        margin: 0 auto 1rem;
         position: relative;
-        overflow: hidden;
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 30px;
+        padding: 8px;
+        box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
     }
     
-    .progress-fill::after {
-        content: '';
+    .thermo-fill {
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(
-            90deg,
-            transparent,
-            rgba(255, 255, 255, 0.2),
-            transparent
-        );
-        animation: shimmer 2s infinite;
+        bottom: 8px;
+        left: 8px;
+        right: 8px;
+        border-radius: 22px;
+        transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 0 20px currentColor;
     }
     
-    @keyframes shimmer {
-        0% { transform: translateX(-100%); }
-        100% { transform: translateX(100%); }
+    .thermo-bulb {
+        position: absolute;
+        bottom: -15px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 0 25px currentColor;
     }
     
-    /* Score */
-    .score-badge {
-        min-width: 70px;
-        text-align: center;
-        padding: 0.4rem 0.8rem;
-        border-radius: 8px;
+    .score-display {
+        font-size: 2rem;
         font-weight: 700;
-        font-size: 0.95rem;
-        background: rgba(51, 65, 85, 0.5);
-        color: #f1f5f9;
+        margin: 0.5rem 0;
     }
     
-    /* Section headers */
+    .strength-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        opacity: 0.9;
+    }
+    
+    /* Section Headers */
     .section-header {
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 0.75rem;
-        margin: 2rem 0 1rem 0;
-        padding: 0.75rem 1rem;
+        margin: 2.5rem 0 1.5rem 0;
+        padding: 1rem;
         background: rgba(51, 65, 85, 0.3);
-        border-radius: 10px;
-        border-left: 4px solid #667eea;
+        border-radius: 12px;
+        border-left: 4px solid #3b82f6;
     }
     
     .section-title {
-        font-size: 1.4rem;
+        font-size: 1.5rem;
         font-weight: 700;
         color: #f1f5f9;
         margin: 0;
     }
     
-    .section-icon {
-        font-size: 1.5rem;
-    }
-    
-    /* Bouton personnalisé */
+    /* Bouton */
     .stButton > button {
         width: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
         color: white;
         font-weight: 600;
         font-size: 1.1rem;
@@ -388,10 +335,9 @@ st.markdown("""
     
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4);
     }
     
-    /* Info box */
     .info-box {
         background: rgba(59, 130, 246, 0.1);
         border-left: 4px solid #3b82f6;
@@ -401,71 +347,103 @@ st.markdown("""
         margin: 1rem 0;
     }
     
-    /* Responsive */
+    /* Compact Table */
+    .compact-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1rem 0;
+        background: rgba(30, 41, 59, 0.4);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    
+    .compact-table th {
+        background: rgba(51, 65, 85, 0.6);
+        color: #94a3b8;
+        padding: 0.75rem;
+        font-weight: 600;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .compact-table td {
+        padding: 0.6rem 0.75rem;
+        color: #e2e8f0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+    }
+    
+    .compact-table tr:hover {
+        background: rgba(51, 65, 85, 0.3);
+    }
+    
     @media (max-width: 768px) {
-        .main-header { font-size: 2rem; }
-        .bar-label { min-width: 90px; font-size: 0.85rem; }
-        .score-badge { min-width: 60px; font-size: 0.85rem; }
+        .gauge-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+        .thermometer { width: 50px; height: 160px; }
+        .thermo-bulb { width: 40px; height: 40px; }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown('<h1 class="main-header">📊 Strength Meter PRO</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Analyseur de force des devises, métaux et indices en temps réel</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🌡️ Strength Meter PRO</h1>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Vue Thermomètre - Analyse de force instantanée</p>', unsafe_allow_html=True)
 
-# Informations
 st.markdown("""
 <div class="info-box">
-    <strong>🎯 Méthodologie :</strong> Calcul basé sur ATR normalisé + Z-score | 
-    <strong>📅 Période :</strong> 60 jours | 
-    <strong>🔄 Lookback :</strong> 3 jours | 
-    <strong>📊 Assets :</strong> 28 paires FX + 2 métaux + 3 indices
+    <strong>🎯 Méthodologie :</strong> ATR normalisé + Z-score | 
+    <strong>📊 33 Assets :</strong> 28 paires FX + 2 métaux + 3 indices
 </div>
 """, unsafe_allow_html=True)
 
 # Bouton de calcul
 if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
-    with st.spinner("⏳ Téléchargement des données et calcul en cours..."):
-        df_entities, cats = compute_strength(CONFIG)
+    with st.spinner("⏳ Calcul en cours..."):
+        df_entities = compute_strength(CONFIG)
 
     if df_entities is None or df_entities.empty:
-        st.error("❌ Aucune donnée calculée. Vérifiez votre connexion ou la configuration des tickers.")
+        st.error("❌ Aucune donnée calculée.")
     else:
-        # SECTION 1: ENTITÉS
+        # VUE PRINCIPALE: GAUGES THERMOMÈTRES
         st.markdown("""
         <div class="section-header">
-            <span class="section-icon">🌍</span>
-            <h2 class="section-title">Force des Devises & Assets</h2>
+            <span style="font-size: 1.5rem;">🌡️</span>
+            <h2 class="section-title">Thermomètres de Force</h2>
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+        # Création des gauges en HTML
+        gauge_html = '<div class="gauge-grid">'
+        
         for ent in df_entities.index:
             score = float(df_entities.loc[ent, 'score_smoothed'])
-            pct = max(min(score / 10.0, 1.0), 0.0) * 100
-            color = modern_color(score)
+            height_pct = max(min(score / 10.0, 1.0), 0.0) * 100
+            color = get_color_from_score(score)
+            label = get_strength_label(score)
             
-            bar_html = f"""
-            <div class='bar-item'>
-                <div class='bar-label'>{ent}</div>
-                <div class='progress-bar'>
-                    <div class='progress-fill' style='width:{pct}%; background: linear-gradient(90deg, {color}, {color}dd);'></div>
+            gauge_html += f"""
+            <div class="gauge-card">
+                <div class="gauge-label">{ent}</div>
+                <div class="thermometer">
+                    <div class="thermo-fill" style="height: {height_pct}%; background: {color}; color: {color};"></div>
+                    <div class="thermo-bulb" style="background: {color}; color: {color};"></div>
                 </div>
-                <div class='score-badge' style='background: {color}22; color: {color};'>{score:.2f}</div>
+                <div class="score-display" style="color: {color};">{score:.1f}</div>
+                <div class="strength-label" style="color: {color};">{label}</div>
             </div>
             """
-            st.markdown(bar_html, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # SECTION 2: PAIRES
+        
+        gauge_html += '</div>'
+        st.markdown(gauge_html, unsafe_allow_html=True)
+        
+        # SECTION PAIRES (Compact)
         st.markdown("""
         <div class="section-header">
-            <span class="section-icon">💹</span>
-            <h2 class="section-title">Analyse par Paire</h2>
+            <span style="font-size: 1.5rem;">💹</span>
+            <h2 class="section-title">Analyse Détaillée des Paires</h2>
         </div>
         """, unsafe_allow_html=True)
-
+        
         pairs_list = []
         for ticker, info in CONFIG['tickers'].items():
             weight, base, quote, category = info
@@ -477,42 +455,45 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
                 pair_score = float(np.clip(pair_score, 0.0, 10.0))
             else:
                 pair_score = 5.0
+            
             pairs_list.append({
-                'ticker': ticker,
-                'base': base,
-                'quote': quote,
-                'score': round(pair_score, 2),
-                'category': category
+                'Paire': ticker.replace('=X', '').replace('^', '').replace('=F', ''),
+                'Base': base,
+                'Quote': quote,
+                'Score': round(pair_score, 2),
+                'Force': get_strength_label(pair_score),
+                'Catégorie': category
             })
 
-        df_pairs = pd.DataFrame(pairs_list).sort_values(by='score', ascending=False).reset_index(drop=True)
-
-        st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+        df_pairs = pd.DataFrame(pairs_list).sort_values(by='Score', ascending=False).reset_index(drop=True)
+        
+        # Affichage en tableau compact avec style
+        table_html = '<table class="compact-table"><thead><tr>'
+        table_html += '<th>Paire</th><th>Base</th><th>Quote</th><th>Score</th><th>Force</th><th>Catégorie</th>'
+        table_html += '</tr></thead><tbody>'
+        
         for _, row in df_pairs.iterrows():
-            ticker = row['ticker']
-            score = float(row['score'])
-            category = row['category']
-            icon = get_category_icon(category)
-            pct = max(min(score / 10.0, 1.0), 0.0) * 100
-            color = modern_color(score)
+            color = get_color_from_score(row['Score'])
+            icon = '💱' if row['Catégorie'] == 'FX' else ('🥇' if row['Catégorie'] == 'METAL' else '📈')
             
-            html = f"""
-            <div class='bar-item'>
-                <div class='bar-label'>{icon} {ticker}</div>
-                <div class='progress-bar'>
-                    <div class='progress-fill' style='width:{pct}%; background: linear-gradient(90deg, {color}, {color}dd);'></div>
-                </div>
-                <div class='score-badge' style='background: {color}22; color: {color};'>{score:.2f}</div>
-            </div>
+            table_html += f"""
+            <tr>
+                <td style="font-weight: 600;">{row['Paire']}</td>
+                <td>{row['Base']}</td>
+                <td>{row['Quote']}</td>
+                <td style="color: {color}; font-weight: 700; font-size: 1.1rem;">{row['Score']:.2f}</td>
+                <td style="color: {color}; font-weight: 600;">{row['Force']}</td>
+                <td>{icon} {row['Catégorie']}</td>
+            </tr>
             """
-            st.markdown(html, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Téléchargement CSV
+        
+        table_html += '</tbody></table>'
+        st.markdown(table_html, unsafe_allow_html=True)
+        
+        # Export CSV
         st.markdown("---")
         out_entities = df_entities.reset_index().rename(columns={'index': 'entity'})
-        out_pairs = df_pairs.copy()
-        csv_buf = "== ENTITÉS ==\n" + out_entities.to_csv(index=False) + "\n\n== PAIRES ==\n" + out_pairs.to_csv(index=False)
+        csv_buf = "== ENTITÉS ==\n" + out_entities.to_csv(index=False) + "\n\n== PAIRES ==\n" + df_pairs.to_csv(index=False)
         st.download_button(
             "📥 Télécharger les résultats (CSV)",
             csv_buf.encode('utf-8'),
@@ -521,39 +502,10 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
             use_container_width=True
         )
 
-        # Affichage par catégorie (optionnel)
-        if cats:
-            st.markdown("""
-            <div class="section-header">
-                <span class="section-icon">📂</span>
-                <h2 class="section-title">Vue par Catégorie</h2>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            cols = st.columns(len(cats))
-            for idx, (cat_name, frame) in enumerate(cats.items()):
-                with cols[idx]:
-                    st.markdown(f"**{get_category_icon(cat_name)} {cat_name}**")
-                    
-                    # Fonction pour colorer les cellules
-                    def color_score(val):
-                        try:
-                            score = float(val)
-                            color = modern_color(score)
-                            return f'background-color: {color}22; color: {color}; font-weight: 600;'
-                        except:
-                            return ''
-                    
-                    st.dataframe(
-                        frame.style.applymap(color_score, subset=['score']),
-                        height=300,
-                        use_container_width=True
-                    )
-
 else:
     st.markdown("""
     <div class="info-box">
-        👆 Cliquez sur le bouton ci-dessus pour lancer l'analyse complète des 33 instruments financiers.
+        👆 Cliquez sur le bouton pour voir les thermomètres de force en temps réel
     </div>
     """, unsafe_allow_html=True)
 
@@ -561,6 +513,6 @@ else:
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: #64748b; font-size: 0.9rem;'>
-    Made with 💜 | Données: Yahoo Finance | Mise à jour en temps réel
+    Made with 💜 | Données: Yahoo Finance
 </p>
 """, unsafe_allow_html=True)
