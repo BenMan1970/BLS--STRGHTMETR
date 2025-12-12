@@ -195,117 +195,105 @@ def compute_strength(config=CONFIG):
     return df_raw, category_frames
 
 # ------------------------------------------------------------
-# STREAMLIT APP
+# STREAMLIT APP — ARTEFACT BAR SCROLLER NEON
 # ------------------------------------------------------------
 
 st.set_page_config(page_title="Strength Meter PRO", layout="wide")
 
+# Inject NEON CSS for Artefact Scroller
 st.markdown("""
 <style>
-/* Card-like container */
-.app-card{
-  padding:18px;
-  border-radius:14px;
-  background:#0f1720;
-  border:1px solid #23303a;
-  margin-bottom:18px;
+body {background-color:#050505; color:#e0ffef;}
+.bar-container {
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  margin-top:25px;
 }
-.app-title{color:#bfeecf;font-size:22px;margin-bottom:6px}
-.app-sub{color:#9fbeb0;margin-bottom:12px}
+.bar-item {
+  display:flex;
+  align-items:center;
+  padding:14px 18px;
+  border-radius:10px;
+  background:rgba(10,10,10,0.6);
+  backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,0.08);
+  box-shadow:0 0 12px rgba(0,255,160,0.12);
+}
+.bar-label {
+  width:90px;
+  font-weight:bold;
+  font-size:18px;
+  color:#baffe8;
+}
+.neon-bar {
+  flex:1;
+  height:18px;
+  border-radius:9px;
+  background:linear-gradient(90deg,#400,#200);
+  position:relative;
+  overflow:hidden;
+  box-shadow:0 0 6px rgba(0,0,0,0.6);
+}
+.neon-fill {
+  height:100%;
+  width:50%;
+  border-radius:9px;
+  background:#0f0;
+  box-shadow:0 0 10px #0f0;
+  transition:width 0.4s ease-out, background 0.4s ease-out, box-shadow 0.4s ease-out;
+}
+.score-text {
+  width:70px;
+  text-align:right;
+  font-weight:bold;
+  font-size:18px;
+  color:#afffef;
+  margin-left:12px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Strength Meter PRO")
-st.write("Analyse multi-actifs pondérée avec ATR et normalisation z-score.")
+st.title("Strength Meter PRO — Artefact NEON")
+st.write("Visualisation Artefact / Bloomberg en barres néon dynamiques.")
 
-# action
+# Neon color mapping
+def neon_color(score):
+    if score < 3:
+        return "#ff005d"  # neon red
+    elif score < 6:
+        return "#ff9900"  # neon orange
+    elif score < 8:
+        return "#ffee00"  # neon yellow
+    else:
+        return "#00ff9d"  # neon green
+
 if st.button("Calculer"):
-    with st.spinner("Téléchargement des données et calcul en cours…"):
-        df, cats = compute_strength(CONFIG)
+    df, cats = compute_strength(CONFIG)
 
-    # Main boxed header
-    st.markdown("<div class='app-card'><div class='app-title'>Classement Global</div><div class='app-sub'>Scores 0 → 10 (smoothed)</div></div>", unsafe_allow_html=True)
+    st.subheader("Artefact Neon Bar Scroller — Tous actifs")
 
-    # Styled table + heatmap + bar gauge per row
-    # 1) Dataframe styled
-    styled = df.copy()
-    styled_display = styled[['score', 'score_smoothed']].round(2)
+    st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
 
-    # show the styled dataframe (streamlit supports st.dataframe with pandas Styler)
-    try:
-        st.dataframe(styled_display.style.applymap(highlight_strength, subset=['score_smoothed']))
-    except Exception:
-        # fallback
-        st.dataframe(styled_display)
-
-    # 2) Heatmap (bar) using Plotly
-    try:
-        fig = px.bar(
-            df.reset_index().rename(columns={'index': 'asset'}),
-            x='asset',
-            y='score_smoothed',
-            color='score_smoothed',
-            labels={'score_smoothed': 'Score (smoothed)', 'asset': 'Asset'},
-            color_continuous_scale='RdYlGn'
-        )
-        fig.update_layout(margin=dict(l=20, r=20, t=30, b=20))
-        st.plotly_chart(fig, use_container_width=True)
-    except Exception:
-        pass
-
-    # 3) Per-asset gauge bars in two columns for compactness
-    st.markdown("<div style='display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;'>", unsafe_allow_html=True)
     for asset in df.index:
-        score = df.loc[asset, 'score_smoothed']
-        card = f"<div style='width:230px;padding:12px;border-radius:10px;background:#081018;border:1px solid #1f2b33;'>"
-        card += f"<div style='font-weight:700;color:#bfeecf;margin-bottom:6px;'>{asset}</div>"
-        card += color_bar(score)
-        card += f"<div style='margin-top:8px;color:#9fbeb0;'>Score: {float(score):.2f}</div>"
-        card += "</div>"
-        st.markdown(card, unsafe_allow_html=True)
+        score = float(df.loc[asset, 'score_smoothed'])
+        pct = min(max(score / 10, 0), 1) * 100
+        color = neon_color(score)
+
+        bar_html = f"""
+        <div class='bar-item'>
+            <div class='bar-label'>{asset}</div>
+            <div class='neon-bar'>
+                <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
+            </div>
+            <div class='score-text'>{score:.2f}</div>
+        </div>
+        """
+        st.markdown(bar_html, unsafe_allow_html=True)
+
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 4) Categories as expanders
-    if CONFIG.get('category_mode') and cats:
-        for cat_name, frame in cats.items():
-            with st.expander(f"Catégorie : {cat_name}"):
-                try:
-                    st.dataframe(frame.style.applymap(lambda v: highlight_strength(v), subset=['score']))
-                except Exception:
-                    st.dataframe(frame)
-
-    # Footer summary box
-    st.markdown("<div class='app-card'><div style='color:#cfe8d8;'>Dernière mise à jour : données Yahoo Finance (period={})</div></div>".format(CONFIG['period']), unsafe_allow_html=True)
-
-    # Allow user to download CSV
-    csv = df.reset_index().rename(columns={'index': 'asset'}).to_csv(index=False).encode('utf-8')
-    st.download_button("Télécharger en CSV", csv, file_name='strength_meter.csv', mime='text/csv')
-
 else:
-    st.info("Cliquez sur 'Calculer' pour lancer l'analyse.")
-
-# ---------------------------
-# Theme instruction for .streamlit/config.toml
-# ---------------------------
-st.markdown("""
-
----
-
-Pour activer le thème Dark Pro, créez le fichier `.streamlit/config.toml` avec le contenu suivant :
-
-```toml
-[theme]
-primaryColor = "#00D47E"
-backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#1A1D23"
-textColor = "#FFFFFF"
-font = "sans serif"
-```
-
----
-
-""", unsafe_allow_html=True)
+    st.info("Cliquez sur Calculer pour lancer l'analyse dans le style Artefact NEON.")
 
 # End of app
-
-    
