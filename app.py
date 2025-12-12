@@ -271,39 +271,52 @@ def neon_color(score):
 
 # ---- SECTION 2: PAIRES / ACTIFS INDIVIDUELS ----
 
-st.subheader("Artefact Neon Bar Scroller — Paires & Actifs")
-st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+if st.button("Calculer"):
+    df, cats = compute_strength(CONFIG)
 
-for ticker, info in CONFIG['tickers'].items():
-    df_pairs = yf.download(ticker, period=CONFIG['period'], interval=CONFIG['interval'], progress=False)
-    if df_pairs.empty:
-        continue
-    # compute score pair-based from earlier df
-    # if pair exists
-    base = info[1]
-    quote = info[2]
-    if base in df.index and quote in df.index:
-        # approximate pair score = difference
-        score = float(df.loc[base, 'score_smoothed'] - df.loc[quote, 'score_smoothed'])
-        score_norm = max(min((score + 10) / 20 * 10, 10), 0)
-        pct = min(max(score_norm / 10, 0), 1) * 100
-        color = neon_color(score_norm)
-        html_pair = f"""
+    # ---- ENTITÉS ----
+    st.subheader("Artefact Neon Bar Scroller — Devises (entités)")
+    st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+    for asset in df.index:
+        score = float(df.loc[asset, 'score_smoothed'])
+        pct = min(max(score / 10, 0), 1) * 100
+        color = neon_color(score)
+        st.markdown(f"""
         <div class='bar-item'>
-            <div class='bar-label'>{ticker}</div>
+            <div class='bar-label'>{asset}</div>
             <div class='neon-bar'>
                 <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
             </div>
-            <div class='score-text'>{score_norm:.2f}</div>
+            <div class='score-text'>{score:.2f}</div>
         </div>
-        """
-        st.markdown(html_pair, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown("</div>", unsafe_allow_html=True)
+    # ---- PAIRES ----
+    st.subheader("Artefact Neon Bar Scroller — Paires & Actifs")
+    st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
 
-# ---- BOUTON ----
+    for ticker, info in CONFIG['tickers'].items():
+        base = info[1]
+        quote = info[2]
+        if base in df.index and quote in df.index:
+            score = float(df.loc[base, 'score_smoothed'] - df.loc[quote, 'score_smoothed'])
+            score_norm = max(min((score + 10) / 20 * 10, 10), 0)
+            pct = min(max(score_norm / 10, 0), 1) * 100
+            color = neon_color(score_norm)
+            st.markdown(f"""
+            <div class='bar-item'>
+                <div class='bar-label'>{ticker}</div>
+                <div class='neon-bar'>
+                    <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
+                </div>
+                <div class='score-text'>{score_norm:.2f}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-if st.button("Calculer")("Calculer"):
+    st.markdown("</div>", unsafe_allow_html=True)
+else:
+    st.info("Cliquez sur Calculer pour lancer l'analyse dans le style Artefact NEON.")("Calculer")("Calculer"):
     df, cats = compute_strength(CONFIG)
 
     st.subheader("Artefact Neon Bar Scroller — Devises (entités)")
