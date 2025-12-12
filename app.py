@@ -1,141 +1,96 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import yfinance as yf
-from scipy.stats import zscore
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ------------------------------------------------------------
-# 1. STYLE CSS (DESIGN TUILES)
+# 1. STYLE CSS
 # ------------------------------------------------------------
-st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
+st.set_page_config(page_title="Forex Market Map", layout="wide")
 
 st.markdown("""
 <style>
-    /* Fond sombre global */
-    .stApp { background-color: #0e1117; }
-
-    /* CONTENEUR PRINCIPAL FLEXBOX (Pour aligner les tuiles) */
-    .heatmap-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-start;
-        padding: 10px 0;
-        width: 100%;
+    .stApp { 
+        background-color: #f8f9fa;
+        font-family: Arial, sans-serif;
     }
-
-    /* LA TUILE (Carte rectangulaire) */
-    .market-tile {
-        display: inline-flex;
+    
+    .main-title {
+        font-size: 28px;
+        font-weight: 700;
+        color: #000;
+        margin-bottom: 5px;
+    }
+    
+    .date-info {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+    
+    .matrix-grid {
+        display: grid;
+        grid-template-columns: 80px repeat(8, 150px);
+        gap: 0;
+        margin: 20px 0;
+        width: fit-content;
+    }
+    
+    .currency-header {
+        background-color: #e8e8e8;
+        border: 1px solid #d0d0d0;
+        padding: 15px;
+        text-align: center;
+        font-weight: 700;
+        font-size: 14px;
+        color: #333;
+    }
+    
+    .pair-cell {
+        border: 1px solid rgba(0,0,0,0.1);
+        padding: 10px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        min-height: 60px;
+        display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        width: 120px;
-        height: 70px;
-        border-radius: 6px;
-        color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        border: 1px solid rgba(255,255,255,0.08);
-        transition: transform 0.2s;
     }
     
-    .market-tile:hover {
-        transform: translateY(-3px);
-        border-color: rgba(255,255,255,0.5);
-        cursor: pointer;
+    .pair-cell:hover {
+        transform: scale(1.05);
+        z-index: 10;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
-
-    /* Texte SYMBOLE (ex: EURUSD) */
-    .tile-symbol {
-        font-family: 'Arial', sans-serif;
-        font-weight: 800;
-        font-size: 14px;
+    
+    .pair-name {
+        font-weight: 700;
+        font-size: 11px;
         margin-bottom: 4px;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-    }
-    
-    /* Texte SCORE (ex: 7.8) */
-    .tile-score {
-        font-family: 'Courier New', monospace;
-        font-weight: bold;
-        font-size: 15px;
-        background-color: rgba(0,0,0,0.3);
-        padding: 2px 8px;
-        border-radius: 4px;
-    }
-
-    /* TITRES DES SECTIONS */
-    .section-header {
-        font-family: 'Helvetica', sans-serif;
-        font-size: 18px;
-        font-weight: 600;
-        color: #8b949e;
-        margin-top: 25px;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #30363d;
-        padding-bottom: 5px;
-        width: 100%;
-    }
-    
-    /* Badge de source de données */
-    .data-source-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: 600;
-        margin-bottom: 10px;
-    }
-    
-    .source-oanda {
-        background-color: #15803d;
         color: white;
     }
     
-    .source-yahoo {
-        background-color: #4b5563;
+    .pair-value {
+        font-weight: 600;
+        font-size: 13px;
         color: white;
+    }
+    
+    .empty-cell {
+        background-color: #f0f0f0;
+        border: 1px solid #d0d0d0;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 2. CONFIGURATION DES ACTIFS
+# 2. CONFIGURATION OANDA
 # ------------------------------------------------------------
-CONFIG = {
-    'tickers': [
-        # FOREX
-        'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
-        'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURCAD=X', 'EURNZD=X',
-        'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
-        'AUDJPY=X', 'AUDCAD=X', 'AUDNZD=X', 'AUDCHF=X',
-        'CADJPY=X', 'CADCHF=X', 'NZDJPY=X', 'NZDCHF=X', 'CHFJPY=X',
-        # INDICES
-        '^DJI', '^GSPC', '^IXIC', '^FCHI', '^GDAXI',
-        # MATIÈRES PREMIÈRES
-        'GC=F', 'CL=F', 'SI=F', 'HG=F'
-    ],
-    'period': '60d', 'interval': '1d', 'lookback_days': 3, 'atr_period': 14
-}
+CURRENCIES = ['EUR', 'USD', 'CAD', 'CHF', 'NZD', 'AUD', 'JPY', 'GBP']
 
-# Mapping Yahoo -> OANDA pour les paires Forex
-YAHOO_TO_OANDA = {
-    'EURUSD=X': 'EUR_USD', 'GBPUSD=X': 'GBP_USD', 'USDJPY=X': 'USD_JPY',
-    'USDCHF=X': 'USD_CHF', 'AUDUSD=X': 'AUD_USD', 'USDCAD=X': 'USD_CAD',
-    'NZDUSD=X': 'NZD_USD', 'EURGBP=X': 'EUR_GBP', 'EURJPY=X': 'EUR_JPY',
-    'EURCHF=X': 'EUR_CHF', 'EURAUD=X': 'EUR_AUD', 'EURCAD=X': 'EUR_CAD',
-    'EURNZD=X': 'EUR_NZD', 'GBPJPY=X': 'GBP_JPY', 'GBPCHF=X': 'GBP_CHF',
-    'GBPAUD=X': 'GBP_AUD', 'GBPCAD=X': 'GBP_CAD', 'GBPNZD=X': 'GBP_NZD',
-    'AUDJPY=X': 'AUD_JPY', 'AUDCAD=X': 'AUD_CAD', 'AUDNZD=X': 'AUD_NZD',
-    'AUDCHF=X': 'AUD_CHF', 'CADJPY=X': 'CAD_JPY', 'CADCHF=X': 'CAD_CHF',
-    'NZDJPY=X': 'NZD_JPY', 'NZDCHF=X': 'NZD_CHF', 'CHFJPY=X': 'CHF_JPY'
-}
-
-# ------------------------------------------------------------
-# 3. CONNEXION OANDA
-# ------------------------------------------------------------
 def get_oanda_credentials():
     """Récupère les credentials OANDA depuis les secrets"""
     try:
@@ -143,6 +98,7 @@ def get_oanda_credentials():
         access_token = st.secrets["OANDA_ACCESS_TOKEN"]
         return account_id, access_token
     except:
+        st.error("⚠️ Credentials OANDA manquants. Ajoutez-les dans les Secrets de Streamlit.")
         return None, None
 
 def fetch_oanda_candles(instrument, count=60):
@@ -152,8 +108,8 @@ def fetch_oanda_candles(instrument, count=60):
     if not account_id or not access_token:
         return None
     
-    # URL de l'API OANDA (practice ou live)
-    base_url = "https://api-fxpractice.oanda.com"  # Changez en https://api-fxtrade.oanda.com pour le compte réel
+    # URL de l'API OANDA (practice)
+    base_url = "https://api-fxpractice.oanda.com"
     
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -179,239 +135,165 @@ def fetch_oanda_candles(instrument, count=60):
             # Conversion en DataFrame
             df = pd.DataFrame([{
                 'time': c['time'],
-                'open': float(c['mid']['o']),
-                'high': float(c['mid']['h']),
-                'low': float(c['mid']['l']),
-                'close': float(c['mid']['c']),
-                'volume': int(c['volume'])
+                'close': float(c['mid']['c'])
             } for c in candles if c['complete']])
             
             df['time'] = pd.to_datetime(df['time'])
             df = df.set_index('time')
-            df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
             
             return df
         else:
             return None
     except Exception as e:
-        st.warning(f"Erreur OANDA pour {instrument}: {str(e)}")
         return None
 
-# ------------------------------------------------------------
-# 4. MOTEUR DE CALCUL (DATA)
-# ------------------------------------------------------------
-def calculate_atr(df, period=14):
-    high_low = df['High'] - df['Low']
-    high_close = (df['High'] - df['Close'].shift()).abs()
-    low_close = (df['Low'] - df['Close'].shift()).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    return tr.rolling(window=period, min_periods=1).mean()
+def calculate_pair_change(base, quote, lookback_days=1):
+    """Calcule la variation % d'une paire"""
+    instrument = f"{base}_{quote}"
+    
+    df = fetch_oanda_candles(instrument, count=60)
+    
+    if df is None or len(df) < lookback_days + 1:
+        return None
+    
+    try:
+        price_now = df['close'].iloc[-1]
+        price_past = df['close'].iloc[-(lookback_days + 1)]
+        
+        if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
+            return None
+        
+        pct_change = ((price_now - price_past) / price_past) * 100
+        return pct_change
+    except:
+        return None
 
-def get_market_data(config, use_oanda=True):
-    tickers = config['tickers']
+def get_all_pairs_data(currencies, lookback_days=1):
+    """Récupère toutes les variations des paires"""
     results = {}
-    data_sources = {}
+    total = len(currencies) * len(currencies)
+    current = 0
     
-    # Vérifier si OANDA est disponible
-    oanda_available = use_oanda and get_oanda_credentials()[0] is not None
+    progress_bar = st.progress(0)
+    status = st.empty()
     
-    if oanda_available:
-        st.info("🟢 Connexion OANDA active - Données en temps réel")
-    else:
-        st.info("📊 Utilisation de Yahoo Finance")
-    
-    # Téléchargement Yahoo Finance pour tous les actifs
-    data = yf.download(tickers, period=config['period'], interval=config['interval'], group_by='ticker', progress=False)
-    
-    for ticker in tickers:
-        try:
-            # Essayer OANDA d'abord pour les paires Forex
-            df = None
-            source = "Yahoo"
-            
-            if oanda_available and ticker in YAHOO_TO_OANDA:
-                oanda_instrument = YAHOO_TO_OANDA[ticker]
-                df = fetch_oanda_candles(oanda_instrument, count=60)
-                if df is not None and len(df) >= 20:
-                    source = "OANDA"
-            
-            # Fallback sur Yahoo Finance si OANDA échoue
-            if df is None:
-                df = data[ticker].dropna()
-                if len(df) < 20:
-                    continue
-            
-            close = df['Close']
-            price_now = close.iloc[-1]
-            price_past = close.shift(config['lookback_days']).iloc[-1]
-            
-            if pd.isna(price_now) or pd.isna(price_past) or price_past == 0:
-                continue
-
-            # Calculs
-            raw_move_pct = (price_now - price_past) / price_past
-            atr = calculate_atr(df, config['atr_period']).iloc[-1]
-            atr_pct = (atr / price_now) if price_now != 0 else 0.001
-            strength = raw_move_pct / max(atr_pct, 0.0001)
-            
-            # Catégories
-            if "=X" in ticker:
-                cat = "FOREX"
-            elif "=F" in ticker:
-                cat = "COMMODITIES"
-            elif "^" in ticker:
-                cat = "INDICES"
+    for i, base in enumerate(currencies):
+        for j, quote in enumerate(currencies):
+            if base == quote:
+                results[(i, j)] = None
             else:
-                cat = "OTHER"
+                status.text(f"📊 Analyse {base}/{quote}...")
+                pct = calculate_pair_change(base, quote, lookback_days)
+                results[(i, j)] = pct
             
-            # Nettoyage des noms
-            display_name = ticker.replace('=X','').replace('=F','').replace('^','')
-            mapping = {
-                'DJI':'US30', 'GSPC':'SPX500', 'IXIC':'NAS100', 
-                'FCHI':'CAC40', 'GDAXI':'DAX', 'GC':'GOLD', 
-                'CL':'OIL', 'SI':'SILVER', 'HG':'COPPER'
-            }
-            display_name = mapping.get(display_name, display_name)
-
-            results[ticker] = {
-                'name': display_name,
-                'raw_score': strength,
-                'pct_change': raw_move_pct * 100,  # Variation en %
-                'category': cat
-            }
-            data_sources[ticker] = source
-            
-        except KeyError:
-            continue
-        except Exception as e:
-            st.warning(f"Erreur pour {ticker}: {str(e)}")
-            continue
-
-    if not results:
-        return pd.DataFrame(), {}
-
-    df_res = pd.DataFrame.from_dict(results, orient='index')
+            current += 1
+            progress_bar.progress(current / total)
     
-    # Tri par variation % (du plus positif au plus négatif)
-    return df_res.sort_values(by='pct_change', ascending=False), data_sources
+    progress_bar.empty()
+    status.empty()
+    
+    return results
 
-# ------------------------------------------------------------
-# 5. GÉNÉRATEUR HTML (LOGIQUE CORRIGÉE)
-# ------------------------------------------------------------
-def get_color(pct_change):
-    """Palette de couleurs basée sur la variation % réelle"""
+def get_color_from_pct(pct):
+    """Couleurs basées sur le pourcentage de variation"""
+    if pct is None:
+        return "#e8e8e8"
+    
     # Vert (positif)
-    if pct_change >= 0.50: return "#064e3b"   # Vert très foncé (>0.5%)
-    if pct_change >= 0.30: return "#15803d"   # Vert foncé (>0.3%)
-    if pct_change >= 0.15: return "#22c55e"   # Vert (>0.15%)
-    if pct_change >= 0.05: return "#4ade80"   # Vert clair (>0.05%)
-    if pct_change >= 0.01: return "#86efac"   # Vert très clair (>0.01%)
+    if pct >= 0.50: return "#006400"    # Vert très foncé
+    if pct >= 0.30: return "#228B22"    # Vert foncé
+    if pct >= 0.15: return "#32CD32"    # Vert
+    if pct >= 0.08: return "#90EE90"    # Vert clair
+    if pct >= 0.01: return "#98FB98"    # Vert très clair
     
     # Rouge (négatif)
-    if pct_change <= -0.50: return "#7f1d1d"  # Rouge très foncé (<-0.5%)
-    if pct_change <= -0.30: return "#b91c1c"  # Rouge foncé (<-0.3%)
-    if pct_change <= -0.15: return "#ef4444"  # Rouge (<-0.15%)
-    if pct_change <= -0.05: return "#f87171"  # Rouge clair (<-0.05%)
-    if pct_change <= -0.01: return "#fca5a5"  # Rouge très clair (<-0.01%)
+    if pct <= -0.50: return "#8B0000"   # Rouge très foncé
+    if pct <= -0.30: return "#B22222"   # Rouge foncé
+    if pct <= -0.15: return "#DC143C"   # Rouge
+    if pct <= -0.08: return "#FF6347"   # Rouge clair
+    if pct <= -0.01: return "#FFA07A"   # Rouge très clair
     
-    return "#4b5563"  # Gris neutre (proche de 0)
-
-def generate_full_html_report(df):
-    """
-    Génère le HTML complet avec toutes les sections dans un seul bloc
-    """
-    if df.empty: return "<div style='color:red'>Aucune donnée.</div>"
-    
-    # Définition des sections
-    sections = [
-        ("💱 FOREX (Paires Majeures & Croisées)", 'FOREX'),
-        ("📊 INDICES MONDIAUX", 'INDICES'),
-        ("🪙 MATIÈRES PREMIÈRES", 'COMMODITIES')
-    ]
-    
-    # Construction du HTML en une seule fois
-    tiles_html = ""
-    
-    for title, cat_key in sections:
-        subset = df[df['category'] == cat_key]
-        if subset.empty: continue
-        
-        # Ajouter le titre de section
-        tiles_html += f'<div class="section-header">{title}</div>'
-        
-        # Ouvrir le conteneur
-        tiles_html += '<div class="heatmap-container">'
-        
-        # Ajouter toutes les tuiles
-        for _, row in subset.iterrows():
-            pct_change = row['pct_change']
-            name = row['name']
-            bg_color = get_color(pct_change)
-            
-            tiles_html += f'''
-            <div class="market-tile" style="background-color: {bg_color};">
-                <div class="tile-symbol">{name}</div>
-                <div class="tile-score">{pct_change:+.2f}%</div>
-            </div>
-            '''
-        
-        # Fermer le conteneur
-        tiles_html += '</div>'
-    
-    return tiles_html
+    return "#D3D3D3"  # Gris neutre
 
 # ------------------------------------------------------------
-# 6. APPLICATION STREAMLIT
+# 3. GÉNÉRATEUR HTML DE LA MATRICE
 # ------------------------------------------------------------
-st.title("🗺️ Market Heatmap Pro")
-st.write("Variations du marché en temps réel. Vert = Hausse | Rouge = Baisse")
+def generate_matrix_html(currencies, data):
+    """Génère la matrice exactement comme l'image"""
+    html = '<div class="matrix-grid">'
+    
+    # Première ligne : en-têtes des colonnes
+    html += '<div class="currency-header"></div>'  # Coin vide
+    for currency in currencies:
+        html += f'<div class="currency-header">{currency}</div>'
+    
+    # Lignes de données
+    for i, base in enumerate(currencies):
+        # En-tête de ligne
+        html += f'<div class="currency-header">{base}</div>'
+        
+        # Cellules de paires
+        for j, quote in enumerate(currencies):
+            if i == j:
+                # Cellule diagonale
+                html += f'<div class="pair-cell empty-cell"><span style="color: #333; font-weight: 700;">{base}</span></div>'
+            else:
+                pct = data.get((i, j))
+                
+                if pct is None:
+                    html += '<div class="pair-cell empty-cell"><span style="color: #999; font-size: 12px;">unch</span></div>'
+                else:
+                    color = get_color_from_pct(pct)
+                    pair_name = f"{base}/{quote}"
+                    
+                    html += f'''
+                    <div class="pair-cell" style="background-color: {color};">
+                        <div class="pair-name">{pair_name}</div>
+                        <div class="pair-value">{pct:+.2f}%</div>
+                    </div>
+                    '''
+        
+    html += '</div>'
+    return html
 
-# Options dans la sidebar
+# ------------------------------------------------------------
+# 4. APPLICATION STREAMLIT
+# ------------------------------------------------------------
+st.markdown('<div class="main-title">Forex Market Map</div>', unsafe_allow_html=True)
+
+today = datetime.now().strftime("%a, %b %dth, %Y")
+st.markdown(f'<div class="date-info">{today}</div>', unsafe_allow_html=True)
+
+# Sidebar avec paramètres
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("⚙️ Paramètres")
     
-    use_oanda = st.checkbox("Utiliser OANDA API", value=True, 
-                            help="Utilise l'API OANDA pour des données Forex en temps réel")
-    
-    lookback = st.slider("Période d'analyse (jours)", 1, 10, CONFIG['lookback_days'])
-    CONFIG['lookback_days'] = lookback
-    
-    atr_period = st.slider("Période ATR", 5, 30, CONFIG['atr_period'])
-    CONFIG['atr_period'] = atr_period
+    lookback = st.slider("Période d'analyse (jours)", 1, 5, 1)
     
     st.markdown("---")
     
-    # Vérification de la connexion OANDA
+    # Vérification OANDA
     account_id, access_token = get_oanda_credentials()
     if account_id and access_token:
         st.success("✅ OANDA connecté")
         st.caption(f"Compte: {account_id[:8]}...")
     else:
-        st.warning("⚠️ OANDA non configuré")
-        st.caption("Ajoutez vos credentials dans les Secrets")
+        st.error("❌ OANDA non configuré")
 
-if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
-    with st.spinner("Téléchargement et calculs en cours..."):
-        # 1. Calculs
-        df_results, sources = get_market_data(CONFIG, use_oanda=use_oanda)
-        
-        if not df_results.empty:
-            # Afficher les statistiques de sources
-            oanda_count = sum(1 for s in sources.values() if s == "OANDA")
-            yahoo_count = len(sources) - oanda_count
+# Bouton principal
+if st.button("🔄 Actualiser les données", type="primary"):
+    # Vérifier la connexion OANDA
+    if get_oanda_credentials()[0] is None:
+        st.error("❌ Impossible de continuer sans credentials OANDA. Configurez-les dans les Secrets.")
+    else:
+        with st.spinner("📊 Chargement des données OANDA..."):
+            # Récupération des données
+            data = get_all_pairs_data(CURRENCIES, lookback_days=lookback)
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("📊 Total actifs", len(sources))
-            with col2:
-                st.metric("🟢 OANDA", oanda_count)
-            with col3:
-                st.metric("📈 Yahoo Finance", yahoo_count)
+            # Génération de la matrice
+            matrix_html = generate_matrix_html(CURRENCIES, data)
             
-            # 2. Génération et affichage du HTML
-            html_content = generate_full_html_report(df_results)
-            
-            # 3. Affichage avec components.html pour un meilleur rendu
+            # Affichage
             st.components.v1.html(
                 f"""
                 <!DOCTYPE html>
@@ -420,75 +302,93 @@ if st.button("🚀 SCANNER LE MARCHÉ", type="primary"):
                     <style>
                         body {{
                             margin: 0;
-                            padding: 0;
-                            background-color: transparent;
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            padding: 20px;
+                            background-color: #f8f9fa;
+                            font-family: Arial, sans-serif;
                         }}
-                        .heatmap-container {{
+                        .matrix-grid {{
+                            display: grid;
+                            grid-template-columns: 80px repeat(8, 150px);
+                            gap: 0;
+                            margin: 0;
+                            width: fit-content;
+                        }}
+                        .currency-header {{
+                            background-color: #e8e8e8;
+                            border: 1px solid #d0d0d0;
+                            padding: 15px;
+                            text-align: center;
+                            font-weight: 700;
+                            font-size: 14px;
+                            color: #333;
+                        }}
+                        .pair-cell {{
+                            border: 1px solid rgba(0,0,0,0.1);
+                            padding: 10px;
+                            text-align: center;
+                            cursor: pointer;
+                            transition: all 0.2s;
+                            min-height: 60px;
                             display: flex;
-                            flex-wrap: wrap;
-                            gap: 8px;
-                            justify-content: flex-start;
-                            padding: 10px 0;
-                            width: 100%;
-                        }}
-                        .market-tile {{
-                            display: inline-flex;
                             flex-direction: column;
                             justify-content: center;
                             align-items: center;
-                            width: 120px;
-                            height: 70px;
-                            border-radius: 6px;
-                            color: white;
-                            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-                            border: 1px solid rgba(255,255,255,0.08);
-                            transition: transform 0.2s;
                         }}
-                        .market-tile:hover {{
-                            transform: translateY(-3px);
-                            border-color: rgba(255,255,255,0.5);
-                            cursor: pointer;
+                        .pair-cell:hover {{
+                            transform: scale(1.05);
+                            z-index: 10;
+                            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
                         }}
-                        .tile-symbol {{
-                            font-family: 'Arial', sans-serif;
-                            font-weight: 800;
-                            font-size: 14px;
+                        .pair-name {{
+                            font-weight: 700;
+                            font-size: 11px;
                             margin-bottom: 4px;
-                            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                            color: white;
                         }}
-                        .tile-score {{
-                            font-family: 'Courier New', monospace;
-                            font-weight: bold;
-                            font-size: 15px;
-                            background-color: rgba(0,0,0,0.3);
-                            padding: 2px 8px;
-                            border-radius: 4px;
-                        }}
-                        .section-header {{
-                            font-family: 'Helvetica', sans-serif;
-                            font-size: 18px;
+                        .pair-value {{
                             font-weight: 600;
-                            color: #8b949e;
-                            margin-top: 25px;
-                            margin-bottom: 10px;
-                            border-bottom: 1px solid #30363d;
-                            padding-bottom: 5px;
-                            width: 100%;
+                            font-size: 13px;
+                            color: white;
+                        }}
+                        .empty-cell {{
+                            background-color: #f0f0f0;
+                            border: 1px solid #d0d0d0;
                         }}
                     </style>
                 </head>
                 <body>
-                    {html_content}
+                    {matrix_html}
                 </body>
                 </html>
                 """,
-                height=800,
+                height=700,
                 scrolling=True
             )
             
-        else:
-            st.error("Erreur de récupération des données. Vérifiez votre connexion.")
+            st.success("✅ Matrice mise à jour avec succès !")
+            
+            # Légende
+            st.markdown("---")
+            st.markdown("""
+            **Comment lire la matrice :**
+            - 🟢 **Vert** : La devise de base (ligne) monte contre la devise de cotation (colonne)
+            - 🔴 **Rouge** : La devise de base (ligne) baisse contre la devise de cotation (colonne)
+            - Le pourcentage indique la variation sur la période choisie
+            """)
 
 else:
-    st.info("Cliquez sur le bouton pour lancer l'analyse.")
+    st.info("👆 Cliquez pour charger la matrice des paires Forex (données OANDA)")
+    
+    # Exemple visuel de la matrice
+    st.markdown("""
+    ### 📊 À propos de cette matrice
+    
+    Cette application affiche une **matrice de corrélation des devises** en temps réel via l'API OANDA.
+    
+    Chaque cellule montre la performance d'une paire de devises :
+    - **Ligne** : Devise de base
+    - **Colonne** : Devise de cotation
+    - **Couleur** : Force du mouvement (vert = hausse, rouge = baisse)
+    
+    **Exemple** : La cellule EUR/USD montre comment l'EUR performe contre l'USD.
+    """)
