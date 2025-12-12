@@ -257,6 +257,7 @@ body {background-color:#050505; color:#e0ffef;}
 st.title("Strength Meter PRO — Artefact NEON")
 st.write("Visualisation Artefact / Bloomberg en barres néon dynamiques.")
 
+# ---- SECTION 1: DEVISES (ENTITÉS) ----
 # Neon color mapping
 def neon_color(score):
     if score < 3:
@@ -268,10 +269,44 @@ def neon_color(score):
     else:
         return "#00ff9d"  # neon green
 
-if st.button("Calculer"):
+# ---- SECTION 2: PAIRES / ACTIFS INDIVIDUELS ----
+
+st.subheader("Artefact Neon Bar Scroller — Paires & Actifs")
+st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
+
+for ticker, info in CONFIG['tickers'].items():
+    df_pairs = yf.download(ticker, period=CONFIG['period'], interval=CONFIG['interval'], progress=False)
+    if df_pairs.empty:
+        continue
+    # compute score pair-based from earlier df
+    # if pair exists
+    base = info[1]
+    quote = info[2]
+    if base in df.index and quote in df.index:
+        # approximate pair score = difference
+        score = float(df.loc[base, 'score_smoothed'] - df.loc[quote, 'score_smoothed'])
+        score_norm = max(min((score + 10) / 20 * 10, 10), 0)
+        pct = min(max(score_norm / 10, 0), 1) * 100
+        color = neon_color(score_norm)
+        html_pair = f"""
+        <div class='bar-item'>
+            <div class='bar-label'>{ticker}</div>
+            <div class='neon-bar'>
+                <div class='neon-fill' style='width:{pct}%; background:{color}; box-shadow:0 0 12px {color};'></div>
+            </div>
+            <div class='score-text'>{score_norm:.2f}</div>
+        </div>
+        """
+        st.markdown(html_pair, unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---- BOUTON ----
+
+if st.button("Calculer")("Calculer"):
     df, cats = compute_strength(CONFIG)
 
-    st.subheader("Artefact Neon Bar Scroller — Tous actifs")
+    st.subheader("Artefact Neon Bar Scroller — Devises (entités)")
 
     st.markdown("<div class='bar-container'>", unsafe_allow_html=True)
 
