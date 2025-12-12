@@ -160,24 +160,21 @@ def get_color_from_pct(pct):
 # 3. GÉNÉRATEUR HTML DE LA PYRAMIDE
 # ------------------------------------------------------------
 def generate_pyramid_html(currencies, data):
-    """Génère la matrice pyramidale exactement comme l'image"""
+    """Génère la matrice pyramidale inversée exactement comme l'image"""
     html = """
     <style>
         .pyramid-container {
-            display: flex;
-            flex-direction: column;
-            gap: 0;
-            width: fit-content;
+            display: table;
+            border-collapse: collapse;
             margin: 20px 0;
         }
         
         .pyramid-row {
-            display: flex;
-            gap: 0;
-            justify-content: flex-start;
+            display: table-row;
         }
         
         .currency-label {
+            display: table-cell;
             background-color: #e8e8e8;
             border: 1px solid #d0d0d0;
             padding: 15px;
@@ -186,28 +183,23 @@ def generate_pyramid_html(currencies, data):
             font-size: 14px;
             color: #333;
             width: 150px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            vertical-align: middle;
         }
         
         .pair-cell {
+            display: table-cell;
             border: 1px solid rgba(0,0,0,0.1);
             padding: 10px;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
             width: 150px;
-            min-height: 60px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            height: 60px;
+            vertical-align: middle;
         }
         
         .pair-cell:hover {
             transform: scale(1.05);
-            z-index: 10;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
         
@@ -223,47 +215,48 @@ def generate_pyramid_html(currencies, data):
             font-size: 13px;
             color: white;
         }
-        
-        .header-row {
-            display: flex;
-            gap: 0;
-            margin-bottom: 0;
-        }
     </style>
     
     <div class="pyramid-container">
     """
     
-    # En-têtes des colonnes (devises quote)
-    html += '<div class="header-row">'
-    html += '<div class="currency-label"></div>'  # Coin vide
-    for i in range(1, len(currencies)):
-        html += f'<div class="currency-label">{currencies[i]}</div>'
+    # En-têtes des colonnes (ligne du haut)
+    html += '<div class="pyramid-row">'
+    html += '<div class="currency-label"></div>'
+    for curr in currencies[1:]:
+        html += f'<div class="currency-label">{curr}</div>'
     html += '</div>'
     
-    # Lignes pyramidales
-    for i, base in enumerate(currencies[:-1]):
+    # Lignes de données (pyramide inversée)
+    for i in range(len(currencies) - 1):
+        base = currencies[i]
         html += '<div class="pyramid-row">'
         
         # Label de la devise de base
         html += f'<div class="currency-label">{base}</div>'
         
-        # Cellules de paires (seulement les suivantes)
-        for j in range(i+1, len(currencies)):
+        # Cellules de paires - TOUTES les colonnes
+        for j in range(1, len(currencies)):
             quote = currencies[j]
-            pair = f"{base}/{quote}"
-            pct = data.get(pair)
             
-            if pct is None:
-                html += '<div class="pair-cell" style="background-color: #e8e8e8;"><span style="color: #999; font-size: 12px;">unch</span></div>'
+            # Si quote vient APRÈS base dans la liste, afficher la paire
+            if j > i:
+                pair = f"{base}/{quote}"
+                pct = data.get(pair)
+                
+                if pct is None:
+                    html += '<div class="pair-cell" style="background-color: #e8e8e8;"><span style="color: #999; font-size: 12px;">unch</span></div>'
+                else:
+                    color = get_color_from_pct(pct)
+                    html += f'''
+                    <div class="pair-cell" style="background-color: {color};">
+                        <div class="pair-name">{pair}</div>
+                        <div class="pair-value">{pct:+.2f}%</div>
+                    </div>
+                    '''
             else:
-                color = get_color_from_pct(pct)
-                html += f'''
-                <div class="pair-cell" style="background-color: {color};">
-                    <div class="pair-name">{pair}</div>
-                    <div class="pair-value">{pct:+.2f}%</div>
-                </div>
-                '''
+                # Cellule vide (partie basse de la pyramide)
+                html += '<div class="pair-cell" style="background-color: #e8e8e8;"></div>'
         
         html += '</div>'
     
