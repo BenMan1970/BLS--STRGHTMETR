@@ -534,8 +534,18 @@ if st.button("🚀 LANCER L'ANALYSE", use_container_width=True):
             for idx, (cat_name, frame) in enumerate(cats.items()):
                 with cols[idx]:
                     st.markdown(f"**{get_category_icon(cat_name)} {cat_name}**")
+                    
+                    # Fonction pour colorer les cellules
+                    def color_score(val):
+                        try:
+                            score = float(val)
+                            color = modern_color(score)
+                            return f'background-color: {color}22; color: {color}; font-weight: 600;'
+                        except:
+                            return ''
+                    
                     st.dataframe(
-                        frame.style.background_gradient(cmap='RdYlGn', vmin=0, vmax=10),
+                        frame.style.applymap(color_score, subset=['score']),
                         height=300,
                         use_container_width=True
                     )
