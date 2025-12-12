@@ -2,89 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# ------------------------------------------------------------
-# 1. STYLE CSS (Mise à jour pour le style "Totem / Empilé")
-# ------------------------------------------------------------
 st.set_page_config(page_title="Market Heatmap Pro", layout="wide")
 
-st.markdown("""
-<style>
-    .stApp { background-color: #0e1117; }
-
-    /* CONTENEUR GLOBAL HORIZONTAL */
-    .heatmap-wrap {
-        display: flex;
-        flex-direction: row;
-        gap: 12px; /* Espace entre les colonnes */
-        width: 100%;
-        overflow-x: auto;
-        padding-bottom: 20px;
-        align-items: flex-start; /* Aligner les colonnes en haut */
-    }
-
-    /* UNE COLONNE DE DEVISE (Le Totem) */
-    .currency-col {
-        display: flex;
-        flex-direction: column;
-        gap: 2px; /* Petit espace entre les tuiles empilées */
-        min-width: 130px;
-    }
-
-    /* LE SÉPARATEUR CENTRAL (ex: EUR, USD...) */
-    .currency-separator {
-        font-family: 'Arial', sans-serif;
-        font-weight: 900;
-        font-size: 15px;
-        color: #333;
-        background-color: #e6edf3; /* Gris clair / Blanc comme Barchart */
-        text-align: left;
-        padding: 4px 8px;
-        margin: 4px 0;
-        border-radius: 2px;
-        text-transform: uppercase;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    }
-
-    /* LA TUILE FOREX (Fine et rectangulaire) */
-    .forex-tile {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0 8px;
-        width: 100%;
-        height: 28px; /* Hauteur compacte */
-        color: white;
-        font-size: 12px;
-        font-weight: bold;
-        border-radius: 2px;
-        transition: filter 0.2s;
-    }
-    
-    .forex-tile:hover {
-        filter: brightness(1.2);
-        cursor: pointer;
-    }
-
-    /* POLICE SPÉCIFIQUE */
-    .tile-pair { font-family: sans-serif; opacity: 0.9; }
-    .tile-val { font-family: 'Courier New', monospace; }
-
-    /* TITRES */
-    .section-header {
-        font-family: 'Helvetica', sans-serif;
-        font-size: 18px;
-        font-weight: 600;
-        color: #8b949e;
-        margin-top: 25px;
-        margin-bottom: 15px;
-        border-bottom: 1px solid #30363d;
-        padding-bottom: 5px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 # ------------------------------------------------------------
-# 2. CONFIGURATION & DATAS (INCHANGÉ)
+# 1. CONFIGURATION & DONNÉES
 # ------------------------------------------------------------
 CONFIG = {
     'instruments': {
@@ -102,7 +23,8 @@ CONFIG = {
 }
 
 DISPLAY_NAMES = {
-    'SPX500_USD': 'SPX500', 'NAS100_USD': 'NAS100', 'DE30_EUR': 'DAX', 'XAU_USD': 'GOLD', 'XAG_USD': 'SILVER', 'BCO_USD': 'BRENT'
+    'SPX500_USD': 'SPX500', 'NAS100_USD': 'NAS100', 'DE30_EUR': 'DAX', 
+    'XAU_USD': 'GOLD', 'XAG_USD': 'SILVER', 'BCO_USD': 'BRENT'
 }
 
 def get_oanda_credentials():
@@ -145,168 +67,187 @@ def get_market_data(config):
     return pd.DataFrame.from_dict(results, orient='index')
 
 # ------------------------------------------------------------
-# 3. LOGIQUE COULEUR & MATRIX (LE COEUR DU DESIGN)
+# 2. GÉNÉRATION HTML/CSS (INTEGRÉ POUR L'IFRAME)
 # ------------------------------------------------------------
 def get_color(pct):
-    if pct >= 0.50: return "#064e3b" # Vert Foncé
-    if pct >= 0.25: return "#15803d"
-    if pct >= 0.10: return "#16a34a"
-    if pct >= 0.01: return "#4ade80" # Vert Clair
+    if pct >= 0.50: return "#004d00" # Vert très foncé
+    if pct >= 0.25: return "#006400"
+    if pct >= 0.10: return "#008000"
+    if pct >= 0.01: return "#00a000" # Vert Barchart
     
-    if pct <= -0.50: return "#7f1d1d" # Rouge Foncé
-    if pct <= -0.25: return "#b91c1c"
-    if pct <= -0.10: return "#dc2626"
-    if pct <= -0.01: return "#f87171" # Rouge Clair
+    if pct <= -0.50: return "#8b0000" # Rouge très foncé
+    if pct <= -0.25: return "#a00000"
+    if pct <= -0.10: return "#b00000"
+    if pct <= -0.01: return "#cc0000" # Rouge Barchart
     
-    return "#4b5563" # Gris si 0.00%
+    return "#555" # Gris neutre
 
-def generate_forex_matrix_html(df):
+def generate_report(df):
     forex_df = df[df['cat'] == 'FOREX']
-    if forex_df.empty: return ""
     
-    # 1. Structuration des données (Création des inverses)
-    # On crée un dictionnaire : data[DEVISE]['items'] = liste de paires
+    # --- LOGIQUE DE TRI (MATRIX) ---
     data = {}
+    if not forex_df.empty:
+        for symbol, row in forex_df.iterrows():
+            parts = symbol.split('_')
+            if len(parts) != 2: continue
+            base, quote = parts[0], parts[1]
+            pct = row['pct']
+            
+            if base not in data: data[base] = []
+            if quote not in data: data[quote] = []
+            
+            data[base].append({'pair': f"{base}/{quote}", 'pct': pct, 'other': quote})
+            data[quote].append({'pair': f"{quote}/{base}", 'pct': -pct, 'other': base})
     
-    for symbol, row in forex_df.iterrows():
-        parts = symbol.split('_') # ex: EUR_USD
-        if len(parts) != 2: continue
-        base, quote = parts[0], parts[1]
-        pct = row['pct']
-        
-        # Initialisation si n'existe pas
-        if base not in data: data[base] = []
-        if quote not in data: data[quote] = []
-        
-        # Ajout direct (ex: EUR dans colonne EUR)
-        data[base].append({'pair': f"{base}/{quote}", 'pct': pct, 'other': quote})
-        
-        # Ajout inverse (ex: USD dans colonne USD, valeur inversée)
-        data[quote].append({'pair': f"{quote}/{base}", 'pct': -pct, 'other': base})
-    
-    # 2. Trier les colonnes (Les Devises) par force globale
-    # On calcule la moyenne des % de chaque devise pour savoir qui est à gauche (Fort) ou à droite (Faible)
+    # Tri des devises par force globale (Moyenne des variations)
     currency_scores = {curr: sum(d['pct'] for d in items)/len(items) for curr, items in data.items()}
     sorted_currencies = sorted(currency_scores, key=currency_scores.get, reverse=True)
-    
-    # 3. Génération du HTML
-    html = '<div class="heatmap-wrap">'
+
+    # --- CONSTRUCTION DU HTML ---
+    html_forex = '<div class="matrix-container">'
     
     for curr in sorted_currencies:
         items = data[curr]
         
-        # Séparer Gagnants (Verts) et Perdants (Rouges)
-        winners = [x for x in items if x['pct'] >= 0.005] # Seuil léger pour le 0
+        # Séparation
+        winners = [x for x in items if x['pct'] >= 0.005]
         losers = [x for x in items if x['pct'] < -0.005]
         unchanged = [x for x in items if -0.005 <= x['pct'] < 0.005]
         
-        # TRI IMPORTANT POUR LE LOOK "EMPILÉ" :
-        # - Les verts : du plus fort (haut) au moins fort (bas) -> Descending
-        # - Les rouges : du moins faible (haut) au plus faible (bas) -> Descending aussi (-0.01 est > -0.50)
-        #   Mathématiquement -0.1 est plus grand que -0.5, donc un tri Descending met -0.1 en haut et -0.5 en bas.
-        #   C'est exactement ce qu'on veut : les petites variations près du centre, les grosses aux extrémités.
+        # Tri visuel (Le plus fort en haut, le plus faible en bas)
+        winners.sort(key=lambda x: x['pct'], reverse=True) 
+        losers.sort(key=lambda x: x['pct'], reverse=True) # -0.01 en haut, -0.50 en bas
         
-        winners.sort(key=lambda x: x['pct'], reverse=True)
-        losers.sort(key=lambda x: x['pct'], reverse=True) 
+        html_forex += f'<div class="currency-column">'
         
-        # Tout mettre dans la liste losers pour l'affichage 'unchanged' si on veut, ou les traiter à part.
-        # Ici on ajoute les 'unchanged' aux winners ou losers selon le signe, ou on les affiche en gris.
-        # Pour simplifier comme Barchart :
-        
-        html += '<div class="currency-col">'
-        
-        # --- PILE VERTE (HAUT) ---
+        # 1. PILE VERTE
         for item in winners:
             bg = get_color(item['pct'])
-            html += f'''
-            <div class="forex-tile" style="background-color: {bg};">
-                <span class="tile-pair">{item['other']}</span>
-                <span class="tile-val">+{item['pct']:.2f}%</span>
-            </div>
-            '''
+            html_forex += f'<div class="tile" style="background:{bg}"><span class="pair">{item["other"]}</span><span class="val">+{item["pct"]:.2f}%</span></div>'
             
-        # --- SÉPARATEUR CENTRAL (NOM DE LA DEVISE) ---
-        html += f'<div class="currency-separator">{curr}</div>'
-        
-        # --- PILE GRISE (NEUTRE) ---
-        for item in unchanged:
-             html += f'''
-            <div class="forex-tile" style="background-color: #4b5563;">
-                <span class="tile-pair">{item['other']}</span>
-                <span class="tile-val">unch</span>
-            </div>
-            '''
+        # 2. SÉPARATEUR (NOM DEVISE)
+        html_forex += f'<div class="separator">{curr}</div>'
 
-        # --- PILE ROUGE (BAS) ---
+        # 3. PILE GRISE
+        for item in unchanged:
+             html_forex += f'<div class="tile" style="background:#555"><span class="pair">{item["other"]}</span><span class="val">unch</span></div>'
+        
+        # 4. PILE ROUGE
         for item in losers:
             bg = get_color(item['pct'])
-            html += f'''
-            <div class="forex-tile" style="background-color: {bg};">
-                <span class="tile-pair">{item['other']}</span>
-                <span class="tile-val">{item['pct']:.2f}%</span>
-            </div>
-            '''
+            html_forex += f'<div class="tile" style="background:{bg}"><span class="pair">{item["other"]}</span><span class="val">{item["pct"]:.2f}%</span></div>'
             
-        html += '</div>' # Fin colonne
+        html_forex += '</div>' # Fin colonne
         
-    html += '</div>'
-    return html
+    html_forex += '</div>'
 
-def generate_standard_grid(df, cat):
-    subset = df[df['cat'] == cat].sort_values(by='pct', ascending=False)
-    if subset.empty: return ""
-    html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">'
-    for _, row in subset.iterrows():
-        bg = get_color(row['pct'])
-        html += f'''
-        <div style="background:{bg}; width:110px; height:60px; display:flex; flex-direction:column; justify-content:center; align-items:center; border-radius:4px; color:white; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.3);">
-            <div style="font-size:12px; margin-bottom:4px;">{row['name']}</div>
-            <div style="font-family:monospace; font-size:14px;">{row['pct']:+.2f}%</div>
-        </div>'''
-    html += '</div>'
-    return html
+    # --- AUTRES ACTIFS ---
+    def make_grid(cat):
+        sub = df[df['cat'] == cat].sort_values(by='pct', ascending=False)
+        h = '<div class="grid-container">'
+        for _, r in sub.iterrows():
+            bg = get_color(r['pct'])
+            h += f'<div class="box" style="background:{bg}">{r["name"]}<br><span class="val">{r["pct"]:+.2f}%</span></div>'
+        h += '</div>'
+        return h
+
+    html_indices = make_grid('INDICES')
+    html_commo = make_grid('COMMODITIES')
+
+    # --- CSS COMPLET (INJECTÉ DANS L'IFRAME) ---
+    full_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body {{ font-family: -apple-system, sans-serif; background-color: transparent; color: white; margin: 0; padding: 10px; }}
+        
+        /* CONTENEUR PRINCIPAL HORIZONTAL (SCROLLABLE) */
+        .matrix-container {{
+            display: flex;
+            flex-direction: row; /* C'EST CA LA CLÉ : CÔTE À CÔTE */
+            flex-wrap: nowrap;   /* INTERDICTION DE PASSER À LA LIGNE */
+            gap: 10px;
+            overflow-x: auto;
+            align-items: flex-start; /* Tout aligné en haut */
+            padding-bottom: 20px;
+        }}
+        
+        /* UNE COLONNE (VERTICALE) */
+        .currency-column {{
+            display: flex;
+            flex-direction: column; /* Les tuiles s'empilent DANS la colonne */
+            min-width: 125px;       /* Largeur fixe comme Barchart */
+            max-width: 125px;
+        }}
+
+        /* LA TUILE FOREX */
+        .tile {{
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 8px;
+            margin-bottom: 1px;
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+            border-radius: 1px;
+        }}
+        
+        /* LE SÉPARATEUR CENTRAL */
+        .separator {{
+            background-color: #f0f0f0;
+            color: #222;
+            font-weight: 900;
+            padding: 5px;
+            margin: 3px 0;
+            font-size: 13px;
+        }}
+        
+        .val {{ font-family: monospace; }}
+        
+        /* SECTION TITRES */
+        h3 {{ color: #aaa; border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 30px; font-size: 16px; }}
+        
+        /* INDICES & COMMO (GRILLE) */
+        .grid-container {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+        .box {{ width: 100px; height: 60px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 11px; font-weight: bold; color: white; border-radius: 4px; text-align: center; }}
+        
+        /* SCROLLBAR PROPRE */
+        ::-webkit-scrollbar {{ height: 8px; }}
+        ::-webkit-scrollbar-track {{ background: #222; }}
+        ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 4px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: #777; }}
+    </style>
+    </head>
+    <body>
+        <h3>💱 FOREX MARKET MAP</h3>
+        {html_forex}
+        
+        <h3>📊 INDICES</h3>
+        {html_indices}
+        
+        <h3>🪙 COMMODITIES</h3>
+        {html_commo}
+    </body>
+    </html>
+    """
+    return full_html
 
 # ------------------------------------------------------------
-# 4. RENDU STREAMLIT
+# 3. APP PRINCIPALE
 # ------------------------------------------------------------
-st.title("🗺️ Market Map Pro (Barchart Style)")
+st.title("🗺️ Market Map Pro (Barchart Replica)")
 
 with st.sidebar:
     st.header("Réglages")
     CONFIG['lookback_days'] = st.slider("Jours", 1, 30, 1)
-    if st.secrets.get("OANDA_ACCOUNT_ID"): st.success("Connecté à OANDA")
+    if st.secrets.get("OANDA_ACCOUNT_ID"): st.success("OANDA: OK")
 
 if st.button("🚀 ACTUALISER", type="primary"):
     df_res = get_market_data(CONFIG)
-    
     if not df_res.empty:
-        html_forex = generate_forex_matrix_html(df_res)
-        html_indices = generate_standard_grid(df_res, 'INDICES')
-        html_commo = generate_standard_grid(df_res, 'COMMODITIES')
-        
-        st.components.v1.html(
-            f"""
-            <!DOCTYPE html>
-            <html><head><style>
-                body {{ margin: 0; background: transparent; font-family: sans-serif; }}
-                {st.markdown}
-                /* Recopie des styles pour l'iframe (nécessaire dans Streamlit components) */
-                .heatmap-wrap {{ display: flex; gap: 10px; align-items: flex-start; padding-bottom: 20px; }}
-                .currency-col {{ display: flex; flex-direction: column; gap: 2px; min-width: 120px; }}
-                .currency-separator {{ background: #e6edf3; color: #111; font-weight: 900; padding: 5px 10px; border-radius: 2px; text-align: left; font-size: 14px; margin: 4px 0; }}
-                .forex-tile {{ display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; color: white; font-size: 12px; font-weight: bold; border-radius: 2px; margin-bottom: 1px; min-height: 24px; }}
-                .tile-val {{ font-family: monospace; }}
-                .section-header {{ color: #8b949e; font-size: 18px; font-weight: bold; margin: 20px 0 10px 0; border-bottom: 1px solid #333; }}
-            </style></head><body>
-                <div class="section-header">💱 FOREX MAP</div>
-                {html_forex}
-                
-                <div class="section-header">📊 INDICES</div>
-                {html_indices}
-                
-                <div class="section-header">🪙 MATIÈRES PREMIÈRES</div>
-                {html_commo}
-            </body></html>
-            """,
-            height=900, scrolling=True
-        )
+        html_code = generate_report(df_res)
+        st.components.v1.html(html_code, height=1000, scrolling=True)
+    else:
+        st.error("Aucune donnée.")
