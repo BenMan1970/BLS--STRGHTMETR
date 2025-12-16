@@ -1,236 +1,350 @@
-import streamlit as st
-import pandas as pd
-import requests
+import React, { useState, useEffect } from 'react';
+import { ArrowUp, ArrowDown, Minus, RefreshCw } from 'lucide-react';
 
-st.set_page_config(page_title="Market Map Pro", layout="wide")
+const CurrencyStrengthMeter = () => {
+  const [strengths, setStrengths] = useState({});
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [loading, setLoading] = useState(false);
 
-# ------------------------------------------------------------
-# 1. CONFIGURATION ÉPURÉE
-# ------------------------------------------------------------
-CONFIG = {
-    'instruments': {
-        'FOREX': [
-            'EUR_USD', 'GBP_USD', 'USD_JPY', 'USD_CHF', 'AUD_USD', 'USD_CAD', 'NZD_USD',
-            'EUR_GBP', 'EUR_JPY', 'EUR_CHF', 'EUR_AUD', 'EUR_CAD', 'EUR_NZD',
-            'GBP_JPY', 'GBP_CHF', 'GBP_AUD', 'GBP_CAD', 'GBP_NZD',
-            'AUD_JPY', 'AUD_CAD', 'AUD_NZD', 'AUD_CHF',
-            'CAD_JPY', 'CAD_CHF', 'NZD_JPY', 'NZD_CHF', 'CHF_JPY'
-        ],
-        'INDICES': ['US30_USD', 'NAS100_USD', 'SPX500_USD', 'DE30_EUR'],
-        'COMMODITIES': ['XAU_USD', 'XPT_USD', 'XAG_USD']
-    },
-    'lookback_days': 1
-}
-
-DISPLAY_NAMES = {
-    'US30_USD': 'DOW JONES', 'NAS100_USD': 'NASDAQ 100', 'SPX500_USD': 'S&P 500', 
-    'DE30_EUR': 'DAX 40', 'XAU_USD': 'GOLD', 'XPT_USD': 'PLATINUM', 'XAG_USD': 'SILVER'
-}
-
-# ------------------------------------------------------------
-# 2. DATA ENGINE
-# ------------------------------------------------------------
-def get_oanda_credentials():
-    try: return st.secrets["OANDA_ACCOUNT_ID"], st.secrets["OANDA_ACCESS_TOKEN"]
-    except: return None, None
-
-def fetch_oanda_candles(instrument, count=10):
-    acct, token = get_oanda_credentials()
-    if not acct: return None
-    try:
-        url = f"https://api-fxpractice.oanda.com/v3/instruments/{instrument}/candles?count={count}&granularity=D"
-        headers = {"Authorization": f"Bearer {token}"}
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            candles = resp.json().get('candles', [])
-            if candles: return pd.DataFrame([{'close': float(c['mid']['c'])} for c in candles])
-    except: pass
-    return None
-
-def get_market_data(config):
-    results = {}
-    if not get_oanda_credentials()[0]: return pd.DataFrame()
+  // Les 8 devises majeures
+  const currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'];
+  
+  // Les 28 paires forex majeures (structure exacte)
+  const forexPairs = [
+    // USD pairs
+    { pair: 'EUR/USD', base: 'EUR', quote: 'USD' },
+    { pair: 'GBP/USD', base: 'GBP', quote: 'USD' },
+    { pair: 'AUD/USD', base: 'AUD', quote: 'USD' },
+    { pair: 'NZD/USD', base: 'NZD', quote: 'USD' },
+    { pair: 'USD/JPY', base: 'USD', quote: 'JPY' },
+    { pair: 'USD/CHF', base: 'USD', quote: 'CHF' },
+    { pair: 'USD/CAD', base: 'USD', quote: 'CAD' },
     
-    total = sum(len(v) for v in config['instruments'].values())
-    prog = st.progress(0); curr = 0
+    // EUR pairs (sans EUR/USD déjà listé)
+    { pair: 'EUR/GBP', base: 'EUR', quote: 'GBP' },
+    { pair: 'EUR/JPY', base: 'EUR', quote: 'JPY' },
+    { pair: 'EUR/CHF', base: 'EUR', quote: 'CHF' },
+    { pair: 'EUR/AUD', base: 'EUR', quote: 'AUD' },
+    { pair: 'EUR/CAD', base: 'EUR', quote: 'CAD' },
+    { pair: 'EUR/NZD', base: 'EUR', quote: 'NZD' },
     
-    for category, instruments in config['instruments'].items():
-        for instrument in instruments:
-            try:
-                df = fetch_oanda_candles(instrument, count=config['lookback_days']+5)
-                if df is not None and len(df) > config['lookback_days']:
-                    now = df['close'].iloc[-1]
-                    past = df['close'].shift(config['lookback_days']).iloc[-1]
-                    pct = (now - past) / past * 100
-                    name = DISPLAY_NAMES.get(instrument, instrument.replace('_', '/'))
-                    results[instrument] = {'name': name, 'pct': pct, 'cat': category}
-            except: pass
-            curr += 1; prog.progress(curr/total)
-    prog.empty()
-    return pd.DataFrame.from_dict(results, orient='index')
-
-# ------------------------------------------------------------
-# 3. MOTEUR GRAPHIQUE INTELLIGENT
-# ------------------------------------------------------------
-def get_color(pct):
-    if pct >= 0.50: return "#004d00" 
-    if pct >= 0.25: return "#006400"
-    if pct >= 0.10: return "#008000"
-    if pct >= 0.01: return "#00a000" 
+    // GBP pairs
+    { pair: 'GBP/JPY', base: 'GBP', quote: 'JPY' },
+    { pair: 'GBP/CHF', base: 'GBP', quote: 'CHF' },
+    { pair: 'GBP/AUD', base: 'GBP', quote: 'AUD' },
+    { pair: 'GBP/CAD', base: 'GBP', quote: 'CAD' },
+    { pair: 'GBP/NZD', base: 'GBP', quote: 'NZD' },
     
-    if pct <= -0.50: return "#8b0000" 
-    if pct <= -0.25: return "#a00000"
-    if pct <= -0.10: return "#b00000"
-    if pct <= -0.01: return "#cc0000" 
+    // AUD pairs
+    { pair: 'AUD/JPY', base: 'AUD', quote: 'JPY' },
+    { pair: 'AUD/CHF', base: 'AUD', quote: 'CHF' },
+    { pair: 'AUD/CAD', base: 'AUD', quote: 'CAD' },
+    { pair: 'AUD/NZD', base: 'AUD', quote: 'NZD' },
     
-    return "#555"
-
-def generate_report(df):
-    forex_df = df[df['cat'] == 'FOREX']
+    // NZD pairs
+    { pair: 'NZD/JPY', base: 'NZD', quote: 'JPY' },
+    { pair: 'NZD/CHF', base: 'NZD', quote: 'CHF' },
+    { pair: 'NZD/CAD', base: 'NZD', quote: 'CAD' },
     
-    data = {}
-    if not forex_df.empty:
-        for symbol, row in forex_df.iterrows():
-            parts = symbol.split('_')
-            if len(parts) != 2: continue
-            base, quote = parts[0], parts[1]
-            pct = row['pct']
-            
-            if base not in data: data[base] = []
-            if quote not in data: data[quote] = []
-            
-            data[base].append({'pair': f"{base}/{quote}", 'pct': pct, 'other': quote})
-            data[quote].append({'pair': f"{quote}/{base}", 'pct': -pct, 'other': base})
+    // CAD pairs
+    { pair: 'CAD/JPY', base: 'CAD', quote: 'JPY' },
+    { pair: 'CAD/CHF', base: 'CAD', quote: 'CHF' },
     
-    # --- ALGORITHME "SMART WEIGHTED SCORE" ---
-    # Objectif : Trier les colonnes (devises) comme Barchart
-    currency_scores = {}
+    // CHF pairs
+    { pair: 'CHF/JPY', base: 'CHF', quote: 'JPY' }
+  ];
+
+  // Actifs supplémentaires
+  const additionalAssets = [
+    { symbol: 'XAU/USD', name: 'Or', base: 2050, volatility: 50 },
+    { symbol: 'XPT/USD', name: 'Platine', base: 950, volatility: 30 },
+    { symbol: 'US30', name: 'Dow Jones', base: 37000, volatility: 500 },
+    { symbol: 'NAS100', name: 'Nasdaq 100', base: 16000, volatility: 300 },
+    { symbol: 'SPX500', name: 'S&P 500', base: 4700, volatility: 80 }
+  ];
+
+  // Générer des mouvements de prix simulés sur 24h
+  const generatePriceMovements = () => {
+    const movements = {};
     
-    for curr, items in data.items():
-        score = 0
-        valid_items = 0
-        
-        for item in items:
-            opponent = item['other']
-            val = item['pct']
-            
-            # PONDÉRATION :
-            # Si on gagne contre USD, EUR ou JPY, ça compte DOUBLE.
-            # C'est la logique "Weighted" adaptée au sentiment de marché.
-            weight = 2.0 if opponent in ['USD', 'EUR', 'JPY'] else 1.0
-            
-            score += (val * weight)
-            valid_items += weight
-            
-        # Score final normalisé
-        final_score = score / valid_items if valid_items > 0 else 0
-        currency_scores[curr] = final_score
+    forexPairs.forEach(({ pair }) => {
+      // Mouvement en pourcentage sur 24h (-5% à +5%)
+      movements[pair] = (Math.random() - 0.5) * 10;
+    });
 
-    # Tri basé sur ce score intelligent
-    sorted_currencies = sorted(currency_scores, key=currency_scores.get, reverse=True)
+    additionalAssets.forEach(({ symbol, base, volatility }) => {
+      const change = (Math.random() - 0.5) * (volatility / base) * 100 * 2;
+      movements[symbol] = change;
+    });
 
-    # --- GÉNÉRATION HTML ---
-    html_forex = '<div class="matrix-container">'
-    for curr in sorted_currencies:
-        items = data[curr]
-        winners = [x for x in items if x['pct'] >= 0.005]
-        losers = [x for x in items if x['pct'] < -0.005]
-        unchanged = [x for x in items if -0.005 <= x['pct'] < 0.005]
-        
-        # Tri interne des piles (Magnitude simple)
-        winners.sort(key=lambda x: x['pct'], reverse=True) 
-        losers.sort(key=lambda x: x['pct'], reverse=True)
-        
-        html_forex += f'<div class="currency-column">'
-        for item in winners:
-            bg = get_color(item['pct'])
-            html_forex += f'<div class="tile" style="background:{bg}"><span class="pair">{item["other"]}</span><span class="val">+{item["pct"]:.2f}%</span></div>'
-            
-        html_forex += f'<div class="separator">{curr}</div>'
+    return movements;
+  };
 
-        for item in unchanged:
-             html_forex += f'<div class="tile" style="background:#555"><span class="pair">{item["other"]}</span><span class="val">unch</span></div>'
-        
-        for item in losers:
-            bg = get_color(item['pct'])
-            html_forex += f'<div class="tile" style="background:{bg}"><span class="pair">{item["other"]}</span><span class="val">{item["pct"]:.2f}%</span></div>'
-        html_forex += '</div>'
-    html_forex += '</div>'
+  // MÉTHODE RAW STRENGTH - Logique exacte des CSM professionnels
+  const calculateRawStrength = () => {
+    const movements = generatePriceMovements();
+    const rawStrengths = {};
 
-    def make_grid(cat):
-        sub = df[df['cat'] == cat].sort_values(by='pct', ascending=False)
-        if sub.empty: return ""
-        h = '<div class="grid-container">'
-        for _, r in sub.iterrows():
-            bg = get_color(r['pct'])
-            h += f'''
-            <div class="box" style="background:{bg}">
-                <div style="font-size:12px; margin-bottom:5px;">{r["name"]}</div>
-                <div class="val" style="font-size:14px;">{r["pct"]:+.2f}%</div>
+    // Initialiser à zéro
+    currencies.forEach(curr => {
+      rawStrengths[curr] = 0;
+    });
+
+    // Calculer la force brute pour chaque devise
+    currencies.forEach(targetCurrency => {
+      let totalStrength = 0;
+
+      forexPairs.forEach(({ pair, base, quote }) => {
+        const movement = movements[pair];
+
+        if (base === targetCurrency) {
+          // Si la devise est en BASE: mouvement positif = force
+          totalStrength += movement;
+        } else if (quote === targetCurrency) {
+          // Si la devise est en QUOTE: mouvement négatif = force (donc on inverse)
+          totalStrength -= movement;
+        }
+      });
+
+      rawStrengths[targetCurrency] = totalStrength;
+    });
+
+    // Calculer les actifs supplémentaires (vs USD)
+    additionalAssets.forEach(({ symbol }) => {
+      rawStrengths[symbol] = movements[symbol];
+    });
+
+    // Vérification: la somme des 8 devises doit être ~0 (corrélation)
+    const sum = currencies.reduce((acc, curr) => acc + rawStrengths[curr], 0);
+    console.log('Vérification corrélation (doit être ~0):', sum.toFixed(2));
+
+    // Déterminer les tendances
+    const result = {};
+    Object.keys(rawStrengths).forEach(key => {
+      const strength = rawStrengths[key];
+      result[key] = {
+        rawScore: strength,
+        trend: strength > 0.5 ? 'up' : strength < -0.5 ? 'down' : 'neutral',
+        percentage: strength
+      };
+    });
+
+    return result;
+  };
+
+  const refreshData = () => {
+    setLoading(true);
+    setTimeout(() => {
+      setStrengths(calculateRawStrength());
+      setLastUpdate(new Date());
+      setLoading(false);
+    }, 500);
+  };
+
+  useEffect(() => {
+    refreshData();
+    const interval = setInterval(refreshData, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getColorClass = (score) => {
+    if (score > 5) return 'bg-green-600';
+    if (score > 2) return 'bg-green-500';
+    if (score > -2) return 'bg-yellow-500';
+    if (score > -5) return 'bg-orange-500';
+    return 'bg-red-600';
+  };
+
+  const getTrendIcon = (trend) => {
+    if (trend === 'up') return <ArrowUp className="w-4 h-4" />;
+    if (trend === 'down') return <ArrowDown className="w-4 h-4" />;
+    return <Minus className="w-4 h-4" />;
+  };
+
+  // Trier par force décroissante
+  const sortedCurrencies = currencies
+    .map(curr => ({ curr, ...strengths[curr] }))
+    .filter(item => item.rawScore !== undefined)
+    .sort((a, b) => b.rawScore - a.rawScore);
+
+  const sortedAssets = additionalAssets
+    .map(({ symbol }) => ({ symbol, ...strengths[symbol] }))
+    .filter(item => item.rawScore !== undefined)
+    .sort((a, b) => b.rawScore - a.rawScore);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 text-white p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+            Currency Strength Meter
+          </h1>
+          <p className="text-gray-400">Méthode Raw Strength - 28 Paires Forex + Actifs Majeurs</p>
+          <p className="text-xs text-gray-500 mt-1">Algorithme professionnel: somme des mouvements sur 24h (non moyenné)</p>
+        </div>
+
+        {/* Controls */}
+        <div className="flex justify-between items-center mb-6 bg-slate-800/50 backdrop-blur-sm rounded-lg p-4">
+          <div className="text-sm text-gray-400">
+            Dernière mise à jour: {lastUpdate.toLocaleTimeString('fr-FR')}
+          </div>
+          <button
+            onClick={refreshData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-4 py-2 rounded-lg transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Actualiser
+          </button>
+        </div>
+
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Devises Majeures */}
+          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6">
+            <h2 className="text-2xl font-bold mb-4 text-blue-400">
+              Devises Majeures (Raw Strength)
+            </h2>
+            <div className="space-y-3">
+              {sortedCurrencies.map(({ curr, rawScore, trend, percentage }) => (
+                <div key={curr} className="bg-slate-700/50 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl font-bold">{curr}</span>
+                      {getTrendIcon(trend)}
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-lg font-bold ${percentage > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {percentage > 0 ? '+' : ''}{percentage.toFixed(2)}%
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        Score brut: {rawScore.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="relative w-full h-3 bg-slate-600 rounded-full overflow-hidden">
+                    <div
+                      className={`absolute left-1/2 h-full ${getColorClass(rawScore)} transition-all duration-500`}
+                      style={{
+                        width: `${Math.min(Math.abs(rawScore) * 3, 100)}%`,
+                        transform: rawScore >= 0 ? 'translateX(0)' : 'translateX(-100%)'
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
-            '''
-        h += '</div>'
-        return h
 
-    html_indices = make_grid('INDICES')
-    html_commo = make_grid('COMMODITIES')
+            {/* Vérification de corrélation */}
+            <div className="mt-4 bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">✓ Corrélation vérifiée:</span>
+                <span className="text-gray-400">
+                  La somme des 8 devises = {sortedCurrencies.reduce((acc, {rawScore}) => acc + rawScore, 0).toFixed(2)}
+                  {' '}(≈0)
+                </span>
+              </div>
+            </div>
+          </div>
 
-    full_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <style>
-        body {{ font-family: -apple-system, sans-serif; background-color: transparent; color: white; margin: 0; padding: 10px; }}
-        
-        .matrix-container {{
-            display: flex; flex-direction: row; flex-wrap: nowrap;
-            gap: 10px; overflow-x: auto; align-items: flex-start; padding-bottom: 20px;
-        }}
-        .currency-column {{ display: flex; flex-direction: column; min-width: 125px; max-width: 125px; }}
-        .tile {{ display: flex; justify-content: space-between; padding: 4px 8px; margin-bottom: 1px; font-size: 11px; font-weight: bold; color: white; border-radius: 1px; }}
-        .separator {{ background-color: #f0f0f0; color: #222; font-weight: 900; padding: 5px; margin: 3px 0; font-size: 13px; text-transform: uppercase; }}
-        
-        .grid-container {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-        .box {{ 
-            width: 130px; height: 70px; 
-            display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            font-weight: bold; color: white; border-radius: 4px; text-align: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }}
-        
-        .val {{ font-family: monospace; }}
-        h3 {{ color: #aaa; border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 30px; font-size: 16px; font-family: Helvetica, sans-serif; }}
-        
-        ::-webkit-scrollbar {{ height: 8px; }}
-        ::-webkit-scrollbar-track {{ background: #222; }}
-        ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 4px; }}
-    </style>
-    </head>
-    <body>
-        <h3>💱 FOREX MAP</h3>
-        {html_forex}
-        <h3>📊 INDICES</h3>
-        {html_indices}
-        <h3>🪙 METAUX</h3>
-        {html_commo}
-    </body>
-    </html>
-    """
-    return full_html
+          {/* Actifs Supplémentaires */}
+          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6">
+            <h2 className="text-2xl font-bold mb-4 text-purple-400">Métaux & Indices</h2>
+            <div className="space-y-3">
+              {sortedAssets.map(({ symbol, rawScore, trend, percentage }) => (
+                <div key={symbol} className="bg-slate-700/50 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl font-bold">{symbol}</span>
+                      {getTrendIcon(trend)}
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-lg font-bold ${percentage > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {percentage > 0 ? '+' : ''}{percentage.toFixed(2)}%
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        Score: {rawScore.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="relative w-full h-3 bg-slate-600 rounded-full overflow-hidden">
+                    <div
+                      className={`absolute left-1/2 h-full ${getColorClass(rawScore)} transition-all duration-500`}
+                      style={{
+                        width: `${Math.min(Math.abs(rawScore) * 3, 100)}%`,
+                        transform: rawScore >= 0 ? 'translateX(0)' : 'translateX(-100%)'
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
 
-# ------------------------------------------------------------
-# 4. APP SIMPLE
-# ------------------------------------------------------------
-st.title("🗺️ Market Map Pro")
+            {/* Guide d'interprétation */}
+            <div className="mt-6 bg-purple-900/30 border border-purple-700/50 rounded-lg p-4">
+              <h3 className="font-bold mb-3 text-purple-300">📈 Méthode Raw Strength</h3>
+              <ul className="text-sm text-gray-300 space-y-2">
+                <li>• <strong>Score positif élevé</strong>: Forte demande (hausse générale)</li>
+                <li>• <strong>Score négatif élevé</strong>: Forte vente (baisse générale)</li>
+                <li>• <strong>Trading optimal</strong>: Combiner devise la + forte avec la + faible</li>
+                <li>• <strong>Exemple</strong>: Si EUR = +15% et USD = -10%, alors EUR/USD devrait monter</li>
+              </ul>
+            </div>
+          </div>
+        </div>
 
-with st.sidebar:
-    st.header("Réglages")
-    CONFIG['lookback_days'] = st.slider("Période", 1, 5, 1)
+        {/* Tableau des 28 paires */}
+        <div className="mt-6 bg-slate-800/50 backdrop-blur-sm rounded-xl p-6">
+          <h2 className="text-xl font-bold mb-4 text-gray-300">
+            Les 28 Paires Forex Analysées
+          </h2>
+          <div className="grid grid-cols-4 md:grid-cols-7 gap-2 text-xs">
+            {forexPairs.map(({ pair }) => (
+              <div key={pair} className="bg-slate-700/40 rounded px-2 py-1.5 text-center text-gray-300 hover:bg-slate-600/50 transition-colors">
+                {pair}
+              </div>
+            ))}
+          </div>
+        </div>
 
-if st.button("🚀 ACTUALISER", type="primary"):
-    df_res = get_market_data(CONFIG)
-    if not df_res.empty:
-        html_code = generate_report(df_res)
-        st.components.v1.html(html_code, height=1000, scrolling=True)
-    else:
-        st.error("Erreur de données.")
+        {/* Explication de l'algorithme */}
+        <div className="mt-6 bg-gradient-to-r from-blue-900/40 to-purple-900/40 border border-blue-700/30 rounded-xl p-6">
+          <h3 className="text-lg font-bold mb-3 text-blue-300">🔬 Logique de calcul (Raw Strength Method)</h3>
+          <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-300">
+            <div>
+              <p className="font-semibold mb-2">Pour chaque devise (ex: EUR):</p>
+              <ol className="space-y-1 ml-4">
+                <li>1. Identifier toutes les paires contenant EUR</li>
+                <li>2. Calculer le % de mouvement sur 24h</li>
+                <li>3. Si EUR en base: ajouter le %</li>
+                <li>4. Si EUR en quote: soustraire le %</li>
+                <li>5. Additionner (ne PAS moyenner)</li>
+              </ol>
+            </div>
+            <div className="bg-slate-800/50 rounded-lg p-4">
+              <p className="font-semibold mb-2 text-yellow-300">Exemple AUD:</p>
+              <div className="space-y-1 font-mono text-xs">
+                <div>AUD/CAD = +2.2% → +2.2%</div>
+                <div>AUD/USD = +1.6% → +1.6%</div>
+                <div>EUR/AUD = -2.3% → <span className="text-green-400">+2.3%</span></div>
+                <div>GBP/AUD = -1.9% → <span className="text-green-400">+1.9%</span></div>
+                <div className="border-t border-gray-600 pt-1 mt-1 text-green-400 font-bold">
+                  Total = +13.5% (Force brute)
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>Algorithme professionnel "Raw Strength" - Données simulées pour démonstration</p>
+          <p className="mt-1">Mise à jour automatique toutes les 60 secondes</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default CurrencyStrengthMeter;
